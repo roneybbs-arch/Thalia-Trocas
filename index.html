@@ -444,21 +444,32 @@ function renderStatusStrip() {
     </div>`).join('');
 }
 
-function setChip(k){APP.chipFilter=k==='ALL'?'':k;document.getElementById('f-status').value=APP.chipFilter;applyFilters();}
+function setChip(k){
+  APP.chipFilter=k==='ALL'?'':k;
+  // Sync dropdown checkboxes with chip
+  APP.statusFiltros=k&&k!=='ALL'?[k]:[];
+  document.getElementById('sd-ALL').checked=!k||k==='ALL';
+  ['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','RETIRADO','DESCARTE'].forEach(s=>{
+    const el=document.getElementById('sd-'+s); if(el) el.checked=(s===k);
+  });
+  const nomes={PENDENTE:'Pendente',EXTRAÍDO:'Extraído',NOTA_EMITIDA:'Nota Emitida',RETIRADO:'Retirado',DESCARTE:'Descarte'};
+  const lbl=document.getElementById('status-dd-label');
+  if(lbl) lbl.textContent=k&&k!=='ALL'?nomes[k]:'Todos';
+  applyFilters();
+}
 
 function applyFilters(){
   const busca=document.getElementById('f-busca').value.toLowerCase();
   const loja=document.getElementById('f-loja').value;
   const motivo=document.getElementById('f-motivo').value;
-  const status=document.getElementById('f-status').value;
   const comp=document.getElementById('f-comp').value;
   const mes=document.getElementById('f-mes').value;
-  APP.chipFilter=status;
+  const statusFiltros=APP.statusFiltros||[];
   APP.filtrados=dadosAtivos().filter(d=>{
     if(busca&&!d.marca?.toLowerCase().includes(busca)&&!d.romaneio?.includes(busca)) return false;
     if(loja&&d.loja!==loja) return false;
     if(motivo&&d.motivo!==motivo) return false;
-    if(status&&d.status!==status) return false;
+    if(statusFiltros.length>0&&!statusFiltros.includes(d.status)) return false;
     if(comp&&d.comprador!==comp) return false;
     if(mes&&d.mes!==mes) return false;
     return true;
@@ -467,8 +478,17 @@ function applyFilters(){
 }
 
 function resetFilters(){
-  ['f-busca','f-loja','f-motivo','f-status','f-comp','f-mes'].forEach(id=>document.getElementById(id).value='');
-  APP.chipFilter=''; APP.filtrados=[...dadosAtivos()]; APP.page=1; renderStatusStrip(); renderTable();
+  ['f-busca','f-loja','f-motivo','f-comp','f-mes'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.value='';
+  });
+  APP.chipFilter=''; APP.statusFiltros=[];
+  // Resetar checkboxes
+  document.getElementById('sd-ALL').checked=true;
+  ['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','RETIRADO','DESCARTE'].forEach(s=>{
+    const el=document.getElementById('sd-'+s); if(el) el.checked=false;
+  });
+  const lbl=document.getElementById('status-dd-label'); if(lbl) lbl.textContent='Todos';
+  APP.filtrados=[...dadosAtivos()]; APP.page=1; renderStatusStrip(); renderTable();
 }
 
 function sortBy(col){
@@ -491,8 +511,10 @@ function renderTable(){
   const role=APP.perfil?.role||'viewer';
   const canEdit=role==='admin'||role==='editor';
   const isAdmin=role==='admin';
-  // Mostra/esconde coluna de exclusão
+  // Mostra/esconde colunas de ação
+  const thEdit=document.getElementById('th-edit');
   const thDel=document.getElementById('th-del');
+  if(thEdit) thEdit.style.display=canEdit?'table-cell':'none';
   if(thDel) thDel.style.display=isAdmin?'table-cell':'none';
   const opts=['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','RETIRADO','DESCARTE'];
   const oLbl={PENDENTE:'PENDENTE',EXTRAÍDO:'EXTRAÍDO',NOTA_EMITIDA:'NOTA EMITIDA',RETIRADO:'RETIRADO',DESCARTE:'DESCARTE'};
@@ -509,6 +531,7 @@ function renderTable(){
         <td class="td-val ${vc}">${fmtN(d.valor)}</td>
         <td><select class="ss ss-${d.status}" onchange="updStatus('${d._docId}',this.value,this)">${o}</select></td>
         <td><input class="ci" value="${d.comprador||''}" placeholder="—" onblur="updComp('${d._docId}',this.value)" onkeydown="if(event.key==='Enter')this.blur()"></td>
+        <td>${canEdit?`<button class="edit-btn" title="Editar registro" onclick="abrirEdicao('${d._docId}')">✎</button>`:''}</td>
         <td>${isAdmin?`<button class="del-btn" title="Excluir registro" onclick="excluirRegistro('${d._docId}')">✕</button>`:''}</td>
       </tr>`;
     } else {
@@ -522,7 +545,7 @@ function renderTable(){
         <td class="td-val ${vc}">${fmtN(d.valor)}</td>
         <td><span class="ss ss-${d.status}" style="pointer-events:none">${oLbl[d.status]||d.status}</span></td>
         <td>${d.comprador||'-'}</td>
-        <td></td>
+        <td></td><td></td>
       </tr>`;
     }
   }).join('');
@@ -717,6 +740,161 @@ function renderHistorico(){
   });
 }
 
+// ══ DROPDOWN STATUS MULTI-SELECT ══
+function toggleStatusDd(){
+  const p=document.getElementById('status-dd-panel');
+  p.style.display=p.style.display==='none'?'block':'none';
+}
+document.addEventListener('click',function(e){
+  const btn=document.getElementById('status-dd-btn');
+  const panel=document.getElementById('status-dd-panel');
+  if(btn&&panel&&!btn.contains(e.target)&&!panel.contains(e.target)){
+    panel.style.display='none';
+  }
+});
+function toggleStatusOpt(key){
+  if(key==='ALL'){
+    const all=document.getElementById('sd-ALL').checked;
+    ['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','RETIRADO','DESCARTE'].forEach(s=>{
+      const el=document.getElementById('sd-'+s);
+      if(el) el.checked=false;
+    });
+    document.getElementById('sd-ALL').checked=all;
+  } else {
+    document.getElementById('sd-ALL').checked=false;
+  }
+  applyStatusFilter();
+}
+function applyStatusFilter(){
+  const all=document.getElementById('sd-ALL').checked;
+  const selected=['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','RETIRADO','DESCARTE']
+    .filter(s=>document.getElementById('sd-'+s)?.checked);
+  if(all||selected.length===0){
+    document.getElementById('sd-ALL').checked=true;
+    ['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','RETIRADO','DESCARTE'].forEach(s=>{
+      const el=document.getElementById('sd-'+s);if(el) el.checked=false;
+    });
+    APP.statusFiltros=[];
+    const lbl=document.getElementById('status-dd-label');if(lbl)lbl.textContent='Todos';
+  } else {
+    APP.statusFiltros=selected;
+    const nomes={PENDENTE:'Pendente',EXTRAÍDO:'Extraído',NOTA_EMITIDA:'Nota Emitida',RETIRADO:'Retirado',DESCARTE:'Descarte'};
+    const lbl=document.getElementById('status-dd-label');
+    if(lbl) lbl.textContent=selected.length===1?nomes[selected[0]]:`${selected.length} selecionados`;
+  }
+  applyFilters();
+}
+function getStatusFiltros(){return APP.statusFiltros||[];}
+
+// ══ MODAL DE EDIÇÃO ══
+function abrirEdicao(docId){
+  const d=APP.dados.find(x=>x._docId===docId);
+  if(!d) return;
+  // Remove modal anterior se existir
+  const old=document.getElementById('edit-modal-overlay');
+  if(old) old.remove();
+  const mesesOpts=['AGO/2025','SET/2025','OUT/2025','NOV/2025','DEZ/2025','JAN/2026','FEV/2026','MAR/2026','ABR/2026','MAI/2026','JUN/2026','JUL/2026','AGO/2026','SET/2026','OUT/2026','NOV/2026','DEZ/2026','JAN/2027']
+    .map(m=>`<option value="${m}" ${d.mes===m?'selected':''}>${m}</option>`).join('');
+  const motivoOpts=['VALIDADE','DANIFICADO','ALTERADO'].map(m=>`<option value="${m}" ${d.motivo===m?'selected':''}>${m}</option>`).join('');
+  const statusOpts=['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','RETIRADO','DESCARTE'];
+  const sLbl={PENDENTE:'Pendente',EXTRAÍDO:'Extraído',NOTA_EMITIDA:'Nota Emitida',RETIRADO:'Retirado',DESCARTE:'Descarte'};
+  const statusOptsHtml=statusOpts.map(s=>`<option value="${s}" ${d.status===s?'selected':''}>${sLbl[s]}</option>`).join('');
+  const overlay=document.createElement('div');
+  overlay.className='edit-modal-overlay';
+  overlay.id='edit-modal-overlay';
+  overlay.innerHTML=`
+    <div class="edit-modal" onclick="event.stopPropagation()">
+      <h3>✎ Editar Registro</h3>
+      <div class="edit-grid">
+        <div class="edit-fg">
+          <div class="edit-lbl">Mês</div>
+          <select id="em-mes" class="edit-input">${mesesOpts}</select>
+        </div>
+        <div class="edit-fg">
+          <div class="edit-lbl">Loja</div>
+          <input id="em-loja" class="edit-input" value="${d.loja||''}">
+        </div>
+        <div class="edit-fg full">
+          <div class="edit-lbl">Marca</div>
+          <input id="em-marca" class="edit-input" value="${d.marca||''}" style="text-transform:uppercase">
+        </div>
+        <div class="edit-fg">
+          <div class="edit-lbl">Romaneio</div>
+          <input id="em-romaneio" class="edit-input" value="${d.romaneio||''}">
+        </div>
+        <div class="edit-fg">
+          <div class="edit-lbl">Valor (R$)</div>
+          <input id="em-valor" class="edit-input" type="number" step="0.01" value="${d.valor||0}">
+        </div>
+        <div class="edit-fg">
+          <div class="edit-lbl">Motivo</div>
+          <select id="em-motivo" class="edit-input">${motivoOpts}</select>
+        </div>
+        <div class="edit-fg">
+          <div class="edit-lbl">Status</div>
+          <select id="em-status" class="edit-input">${statusOptsHtml}</select>
+        </div>
+        <div class="edit-fg full">
+          <div class="edit-lbl">Comprador / Responsável</div>
+          <input id="em-comp" class="edit-input" value="${d.comprador||''}" style="text-transform:uppercase">
+        </div>
+      </div>
+      <div class="edit-actions">
+        <button class="btn btn-outline" onclick="fecharEdicao()">Cancelar</button>
+        <button class="btn btn-amber" onclick="salvarEdicao('${docId}')">💾 Salvar</button>
+      </div>
+    </div>`;
+  overlay.addEventListener('click', fecharEdicao);
+  document.body.appendChild(overlay);
+  // Fecha com ESC
+  overlay._escFn = e => { if(e.key==='Escape') fecharEdicao(); };
+  document.addEventListener('keydown', overlay._escFn);
+}
+function fecharEdicao(){
+  const overlay=document.getElementById('edit-modal-overlay');
+  if(overlay){
+    document.removeEventListener('keydown', overlay._escFn);
+    overlay.remove();
+  }
+}
+async function salvarEdicao(docId){
+  const item=APP.dados.find(d=>d._docId===docId);
+  if(!item) return;
+  const updates={
+    mes: document.getElementById('em-mes').value,
+    loja: document.getElementById('em-loja').value.trim(),
+    marca: document.getElementById('em-marca').value.trim().toUpperCase(),
+    romaneio: document.getElementById('em-romaneio').value.trim(),
+    valor: parseFloat(document.getElementById('em-valor').value)||0,
+    motivo: document.getElementById('em-motivo').value,
+    status: document.getElementById('em-status').value,
+    comprador: document.getElementById('em-comp').value.trim().toUpperCase(),
+  };
+  if(!updates.loja||!updates.marca||!updates.romaneio){
+    toast('⚠️ Loja, Marca e Romaneio são obrigatórios','amber');return;
+  }
+  const btn=document.querySelector('.edit-modal .btn-amber');
+  if(btn){btn.disabled=true;btn.textContent='Salvando...';}
+  try{
+    await updateDoc(doc(db,'romaneios',docId), updates);
+    Object.assign(item, updates);
+    fecharEdicao();
+    populateMesSelects(); initFilters();
+    APP.filtrados=[...dadosAtivos()].filter(d=>{
+      // Reaplicar filtros ativos
+      const busca=document.getElementById('f-busca')?.value.toLowerCase()||'';
+      if(busca&&!d.marca?.toLowerCase().includes(busca)&&!d.romaneio?.includes(busca)) return false;
+      return true;
+    });
+    applyFilters();
+    renderDashboard();
+    toast('✅ Registro atualizado com sucesso','green');
+  }catch(e){
+    toast('❌ Erro ao salvar: '+e.message,'red');
+    if(btn){btn.disabled=false;btn.textContent='💾 Salvar';}
+  }
+}
+
 async function excluirRegistro(docId){
   if(!confirm('Excluir este registro? Esta ação não pode ser desfeita.')) return;
   const item=APP.dados.find(d=>d._docId===docId);
@@ -770,7 +948,8 @@ document.addEventListener('DOMContentLoaded',()=>{
 // ══ EXPOR GLOBAIS ══
 Object.assign(window,{showTab,filtrarMes,applyFilters,resetFilters,sortBy,setChip,
   marcarFiltrados,renderPicker,selMarca,copiarExtracao,handleXlsx,importarPaste,
-  renderHistorico,remMes,excluirRegistro,exportarCSV,fazerLogin,fazerLogout,seedDadosIniciais,goP});
+  renderHistorico,remMes,excluirRegistro,exportarCSV,fazerLogin,fazerLogout,seedDadosIniciais,goP,
+  toggleStatusDd,toggleStatusOpt,applyStatusFilter,abrirEdicao,fecharEdicao,salvarEdicao});
 </script>
 
 <style>
@@ -899,6 +1078,21 @@ td{padding:8px 11px;color:var(--text-mid);vertical-align:middle;white-space:nowr
 .ci:focus{border-color:var(--border2);background:var(--bg);outline:none}.ci:hover{border-color:var(--border)}
 .del-btn{font-size:11px;background:transparent;border:1px solid transparent;color:var(--text-dim);border-radius:4px;padding:2px 6px;cursor:pointer;transition:all .15s;line-height:1}
 .del-btn:hover{color:var(--red);border-color:var(--red);background:var(--red-dim)}
+.edit-btn{font-size:12px;background:transparent;border:1px solid transparent;color:var(--text-dim);border-radius:4px;padding:2px 6px;cursor:pointer;transition:all .15s;line-height:1}
+.edit-btn:hover{color:var(--blue);border-color:var(--blue);background:var(--blue-dim)}
+.sd-item{display:flex;align-items:center;gap:8px;padding:6px 14px;cursor:pointer;font-size:12px;transition:background .1s}
+.sd-item:hover{background:var(--surface2)}
+.sd-item input[type=checkbox]{accent-color:var(--amber);cursor:pointer;width:13px;height:13px}
+.edit-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:500;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)}
+.edit-modal{background:var(--surface);border:1px solid var(--border2);border-radius:14px;padding:24px;width:100%;max-width:480px;box-shadow:0 16px 48px rgba(0,0,0,.6)}
+.edit-modal h3{font-size:14px;font-weight:700;color:var(--text);margin-bottom:18px;display:flex;align-items:center;gap:8px}
+.edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px}
+.edit-fg{display:flex;flex-direction:column;gap:4px}
+.edit-fg.full{grid-column:span 2}
+.edit-lbl{font-size:9px;color:var(--text-dim);letter-spacing:.06em;text-transform:uppercase}
+.edit-input{font-family:var(--sans);font-size:13px;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:6px;padding:7px 10px;outline:none;transition:border-color .15s;width:100%}
+.edit-input:focus{border-color:var(--amber)}
+.edit-actions{display:flex;gap:8px;justify-content:flex-end}
 .pagination{display:flex;align-items:center;gap:6px;padding:10px 14px;border-top:1px solid var(--border);justify-content:center;flex-wrap:wrap}
 .pb{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:5px;border:1px solid var(--border2);background:transparent;color:var(--text-dim);cursor:pointer;transition:all .1s}
 .pb:hover{background:var(--surface2);color:var(--text)}.pb.active{background:var(--amber-glow);color:var(--amber);border-color:var(--amber)}.pb:disabled{opacity:.3;cursor:not-allowed}
@@ -1066,11 +1260,21 @@ td{padding:8px 11px;color:var(--text-mid);vertical-align:middle;white-space:nowr
         <div class="fg"><div class="flbl">Motivo</div>
           <select id="f-motivo" onchange="applyFilters()"><option value="">Todos</option><option>VALIDADE</option><option>DANIFICADO</option><option>ALTERADO</option></select>
         </div>
-        <div class="fg"><div class="flbl">Status</div>
-          <select id="f-status" onchange="applyFilters()">
-            <option value="">Todos</option><option value="PENDENTE">Pendente</option><option value="EXTRAÍDO">Extraído</option>
-            <option value="NOTA_EMITIDA">Nota Emitida</option><option value="RETIRADO">Retirado</option><option value="DESCARTE">Descarte</option>
-          </select>
+        <div class="fg" style="position:relative">
+          <div class="flbl">Status</div>
+          <div id="status-dd-btn" onclick="toggleStatusDd()" style="display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border2);color:var(--text);border-radius:6px;padding:5px 9px;cursor:pointer;min-width:130px;font-size:12px;user-select:none">
+            <span id="status-dd-label">Todos</span>
+            <span style="margin-left:auto;font-size:10px;opacity:.5">▾</span>
+          </div>
+          <div id="status-dd-panel" style="display:none;position:absolute;top:100%;left:0;z-index:200;background:var(--surface);border:1px solid var(--border2);border-radius:8px;padding:6px 0;min-width:170px;box-shadow:0 8px 24px rgba(0,0,0,.4);margin-top:4px">
+            <label class="sd-item" onclick="toggleStatusOpt('ALL')"><input type="checkbox" id="sd-ALL" checked onchange="applyStatusFilter()"><span>Todos</span></label>
+            <div style="height:1px;background:var(--border);margin:4px 8px"></div>
+            <label class="sd-item" onclick="toggleStatusOpt('PENDENTE')"><input type="checkbox" id="sd-PENDENTE" onchange="applyStatusFilter()"><span style="color:#64748b">● Pendente</span></label>
+            <label class="sd-item" onclick="toggleStatusOpt('EXTRAÍDO')"><input type="checkbox" id="sd-EXTRAÍDO" onchange="applyStatusFilter()"><span style="color:#3b82f6">● Extraído</span></label>
+            <label class="sd-item" onclick="toggleStatusOpt('NOTA_EMITIDA')"><input type="checkbox" id="sd-NOTA_EMITIDA" onchange="applyStatusFilter()"><span style="color:#f59e0b">● Nota Emitida</span></label>
+            <label class="sd-item" onclick="toggleStatusOpt('RETIRADO')"><input type="checkbox" id="sd-RETIRADO" onchange="applyStatusFilter()"><span style="color:#10b981">● Retirado</span></label>
+            <label class="sd-item" onclick="toggleStatusOpt('DESCARTE')"><input type="checkbox" id="sd-DESCARTE" onchange="applyStatusFilter()"><span style="color:#f97316">● Descarte</span></label>
+          </div>
         </div>
         <div class="fg"><div class="flbl">Comprador</div><select id="f-comp" onchange="applyFilters()"><option value="">Todos</option></select></div>
         <div class="fg"><button class="btn btn-outline" onclick="resetFilters()">✕ Limpar</button></div>
@@ -1090,7 +1294,7 @@ td{padding:8px 11px;color:var(--text-mid);vertical-align:middle;white-space:nowr
             <th onclick="sortBy('mes')">Mês</th><th onclick="sortBy('loja')">Loja</th>
             <th onclick="sortBy('marca')">Marca</th><th onclick="sortBy('romaneio')">Romaneio</th>
             <th onclick="sortBy('motivo')">Motivo</th><th onclick="sortBy('valor')">Valor R$</th>
-            <th>Status</th><th>Comprador</th><th id="th-del" style="width:36px"></th>
+            <th>Status</th><th>Comprador</th><th id="th-edit" style="width:30px"></th><th id="th-del" style="width:30px"></th>
           </tr></thead>
           <tbody id="table-body"></tbody></table>
         </div>
