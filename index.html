@@ -144,8 +144,7 @@ function showApp() {
   });
   document.getElementById('user-name').textContent = APP.perfil?.nome || APP.user?.email || '';
   document.getElementById('user-role').textContent = {admin:'Administrador',editor:'Editor',viewer:'Visualizador'}[role] || role;
-  const thDel=document.getElementById('th-del');
-  if(thDel) thDel.style.display=role==='admin'?'':'none';
+  // th-del visibility handled in renderTable
 }
 
 // ══ FIRESTORE — CARREGAR ══
@@ -491,13 +490,16 @@ function renderTable(){
   const slice=APP.filtrados.slice(start,start+APP.PER);
   const role=APP.perfil?.role||'viewer';
   const canEdit=role==='admin'||role==='editor';
+  const isAdmin=role==='admin';
+  // Mostra/esconde coluna de exclusão
+  const thDel=document.getElementById('th-del');
+  if(thDel) thDel.style.display=isAdmin?'table-cell':'none';
   const opts=['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','RETIRADO','DESCARTE'];
   const oLbl={PENDENTE:'PENDENTE',EXTRAÍDO:'EXTRAÍDO',NOTA_EMITIDA:'NOTA EMITIDA',RETIRADO:'RETIRADO',DESCARTE:'DESCARTE'};
   document.getElementById('table-body').innerHTML=slice.map(d=>{
     const vc=d.valor>=500?'val-h':d.valor>=100?'val-m':'val-l';
     if(canEdit){
       const o=opts.map(s=>`<option value="${s}" ${d.status===s?'selected':''}>${oLbl[s]}</option>`).join('');
-      const isAdmin=role==='admin';
       return `<tr>
         <td class="td-mes">${d.mes||'-'}</td>
         <td class="td-loja">${d.loja}</td>
