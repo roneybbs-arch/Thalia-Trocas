@@ -144,6 +144,8 @@ function showApp() {
   });
   document.getElementById('user-name').textContent = APP.perfil?.nome || APP.user?.email || '';
   document.getElementById('user-role').textContent = {admin:'Administrador',editor:'Editor',viewer:'Visualizador'}[role] || role;
+  const thDel=document.getElementById('th-del');
+  if(thDel) thDel.style.display=role==='admin'?'':'none';
 }
 
 // ══ FIRESTORE — CARREGAR ══
@@ -495,6 +497,7 @@ function renderTable(){
     const vc=d.valor>=500?'val-h':d.valor>=100?'val-m':'val-l';
     if(canEdit){
       const o=opts.map(s=>`<option value="${s}" ${d.status===s?'selected':''}>${oLbl[s]}</option>`).join('');
+      const isAdmin=role==='admin';
       return `<tr>
         <td class="td-mes">${d.mes||'-'}</td>
         <td class="td-loja">${d.loja}</td>
@@ -504,6 +507,7 @@ function renderTable(){
         <td class="td-val ${vc}">${fmtN(d.valor)}</td>
         <td><select class="ss ss-${d.status}" onchange="updStatus('${d._docId}',this.value,this)">${o}</select></td>
         <td><input class="ci" value="${d.comprador||''}" placeholder="—" onblur="updComp('${d._docId}',this.value)" onkeydown="if(event.key==='Enter')this.blur()"></td>
+        <td>${isAdmin?`<button class="del-btn" title="Excluir registro" onclick="excluirRegistro('${d._docId}')">✕</button>`:''}</td>
       </tr>`;
     } else {
       const stC={PENDENTE:'#64748b',EXTRAÍDO:'#3b82f6',NOTA_EMITIDA:'#f59e0b',RETIRADO:'#10b981',DESCARTE:'#f97316'};
@@ -516,6 +520,7 @@ function renderTable(){
         <td class="td-val ${vc}">${fmtN(d.valor)}</td>
         <td><span class="ss ss-${d.status}" style="pointer-events:none">${oLbl[d.status]||d.status}</span></td>
         <td>${d.comprador||'-'}</td>
+        <td></td>
       </tr>`;
     }
   }).join('');
@@ -698,7 +703,7 @@ function renderHistorico(){
       <td style="color:var(--orange)">${d.filter(x=>x.status==='DESCARTE').length}</td>
       <td>
         <button class="btn btn-sm btn-outline" onclick="document.getElementById('mes-global').value='${m}';filtrarMes();showTab('dashboard')">Ver</button>
-        <button class="btn btn-sm btn-outline" style="color:var(--red);margin-left:4px" data-role="admin" onclick="remMes('${m}')">🗑</button>
+        <button class="btn btn-sm btn-outline" style="color:var(--red);margin-left:4px" data-role="admin" onclick="remMes('${m}')" title="Excluir todos os registros de ${m}">🗑 Excluir mês</button>
       </td>
     </tr>`;
   }).join('');
@@ -708,6 +713,19 @@ function renderHistorico(){
     const needed=el.dataset.role.split(',');
     el.style.display=needed.includes(role)?'':'none';
   });
+}
+
+async function excluirRegistro(docId){
+  if(!confirm('Excluir este registro? Esta ação não pode ser desfeita.')) return;
+  const item=APP.dados.find(d=>d._docId===docId);
+  if(!item) return;
+  try{
+    await deleteDoc(doc(db,'romaneios',docId));
+    APP.dados=APP.dados.filter(d=>d._docId!==docId);
+    APP.filtrados=APP.filtrados.filter(d=>d._docId!==docId);
+    renderTable(); renderStatusStrip(); renderDashboard();
+    toast('🗑 Registro excluído');
+  }catch(e){toast('❌ Erro: '+e.message,'red');}
 }
 
 async function remMes(m){
@@ -750,7 +768,7 @@ document.addEventListener('DOMContentLoaded',()=>{
 // ══ EXPOR GLOBAIS ══
 Object.assign(window,{showTab,filtrarMes,applyFilters,resetFilters,sortBy,setChip,
   marcarFiltrados,renderPicker,selMarca,copiarExtracao,handleXlsx,importarPaste,
-  renderHistorico,remMes,exportarCSV,fazerLogin,fazerLogout,seedDadosIniciais,goP});
+  renderHistorico,remMes,excluirRegistro,exportarCSV,fazerLogin,fazerLogout,seedDadosIniciais,goP});
 </script>
 
 <style>
@@ -877,6 +895,8 @@ td{padding:8px 11px;color:var(--text-mid);vertical-align:middle;white-space:nowr
 .ss-DESCARTE{color:var(--orange);border-color:var(--orange);background:var(--orange-dim)}
 .ci{font-size:10px;background:transparent;border:1px solid transparent;color:var(--text-mid);border-radius:4px;padding:2px 5px;width:80px;text-transform:uppercase}
 .ci:focus{border-color:var(--border2);background:var(--bg);outline:none}.ci:hover{border-color:var(--border)}
+.del-btn{font-size:11px;background:transparent;border:1px solid transparent;color:var(--text-dim);border-radius:4px;padding:2px 6px;cursor:pointer;transition:all .15s;line-height:1}
+.del-btn:hover{color:var(--red);border-color:var(--red);background:var(--red-dim)}
 .pagination{display:flex;align-items:center;gap:6px;padding:10px 14px;border-top:1px solid var(--border);justify-content:center;flex-wrap:wrap}
 .pb{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:5px;border:1px solid var(--border2);background:transparent;color:var(--text-dim);cursor:pointer;transition:all .1s}
 .pb:hover{background:var(--surface2);color:var(--text)}.pb.active{background:var(--amber-glow);color:var(--amber);border-color:var(--amber)}.pb:disabled{opacity:.3;cursor:not-allowed}
@@ -1068,7 +1088,7 @@ td{padding:8px 11px;color:var(--text-mid);vertical-align:middle;white-space:nowr
             <th onclick="sortBy('mes')">Mês</th><th onclick="sortBy('loja')">Loja</th>
             <th onclick="sortBy('marca')">Marca</th><th onclick="sortBy('romaneio')">Romaneio</th>
             <th onclick="sortBy('motivo')">Motivo</th><th onclick="sortBy('valor')">Valor R$</th>
-            <th>Status</th><th>Comprador</th>
+            <th>Status</th><th>Comprador</th><th id="th-del" style="width:36px"></th>
           </tr></thead>
           <tbody id="table-body"></tbody></table>
         </div>
