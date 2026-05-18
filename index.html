@@ -926,12 +926,217 @@ async function remMes(m){
 }
 
 // ══ EXPORT ══
+// ══ EXPORTAR DROPDOWN ══
+function toggleExportDd(){
+  document.getElementById('export-panel').classList.toggle('open');
+}
+document.addEventListener('click',function(e){
+  const dd=document.getElementById('export-dd');
+  if(dd&&!dd.contains(e.target)){
+    document.getElementById('export-panel')?.classList.remove('open');
+  }
+},{capture:true});
+
+function _dadosExportar(){
+  // Usa sempre APP.filtrados (respeita todos os filtros ativos)
+  return APP.filtrados;
+}
+function _nomeArquivo(ext){
+  const partes=[];
+  if(APP.mesGlobal) partes.push(APP.mesGlobal.replace('/','_'));
+  const sf=APP.statusFiltros||[];
+  if(sf.length>0) partes.push(sf.join('-'));
+  const loja=document.getElementById('f-loja')?.value;
+  if(loja) partes.push('L'+loja);
+  return 'trocas_'+(partes.length?partes.join('_'):'filtrados')+'.'+ext;
+}
+
 function exportarCSV(){
-  const d=dadosAtivos();
-  const rows=d.map(x=>`${x.mes},${x.loja},"${x.marca}",${x.romaneio},${x.motivo},${x.valor?.toFixed(2)},${x.status},${x.comprador}`);
+  const d=_dadosExportar();
+  const rows=d.map(x=>`${x.mes||''},${x.loja||''},"${(x.marca||'').replace(/"/g,'""')}",${x.romaneio||''},${x.motivo||''},${(x.valor||0).toFixed(2)},${x.status||''},${x.comprador||''}`);
   const blob=new Blob(['\ufeffMes,Loja,Marca,Romaneio,Motivo,Valor,Status,Comprador\n'+rows.join('\n')],{type:'text/csv;charset=utf-8;'});
-  const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`trocas_${APP.mesGlobal||'todos'}.csv`;a.click();
-  toast('✓ CSV exportado','green');
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=_nomeArquivo('csv');a.click();
+  toast(`✓ CSV exportado — ${d.length} registros`,'green');
+  document.getElementById('export-panel')?.classList.remove('open');
+}
+
+function exportarExcel(){
+  const d=_dadosExportar();
+  if(!d.length){toast('⚠ Nenhum registro nos filtros atuais','amber');return;}
+  // Build XLSX manually (OpenXML) via SheetJS if available, else fallback to CSV with .xlsx extension
+  if(typeof XLSX!=='undefined'){
+    const ws_data=[
+      ['Mês','Loja','Marca','Romaneio','Motivo','Valor (R$)','Status','Comprador']
+    ];
+    d.forEach(x=>ws_data.push([
+      x.mes||'', x.loja||'', x.marca||'', x.romaneio||'',
+      x.motivo||'', Number((x.valor||0).toFixed(2)), x.status||'', x.comprador||''
+    ]));
+    const wb=XLSX.utils.book_new();
+    const ws=XLSX.utils.aoa_to_sheet(ws_data);
+    // Larguras das colunas
+    ws['!cols']=[{wch:10},{wch:6},{wch:28},{wch:12},{wch:12},{wch:12},{wch:14},{wch:14}];
+    // Estilo cabeçalho (SheetJS CE suporta apenas estrutura básica)
+    XLSX.utils.book_append_sheet(wb,ws,'Trocas');
+    const fname=_nomeArquivo('xlsx');
+    XLSX.writeFile(wb,fname);
+    toast(`✓ Excel exportado — ${d.length} registros`,'green');
+  } else {
+    // SheetJS não carregou ainda — fallback CSV
+    toast('⚠ SheetJS ainda carregando, use CSV por enquanto','amber');
+  }
+  document.getElementById('export-panel')?.classList.remove('open');
+}
+
+function exportarTXT(){
+  const d=_dadosExportar();
+  if(!d.length){toast('⚠ Nenhum registro nos filtros atuais','amber');return;}
+  const sep='─'.repeat(90);
+  const pad=(s,n)=>String(s||'').padEnd(n).slice(0,n);
+  let txt='THALIA PERFUMARIA — GESTÃO DE TROCAS\n';
+  // Info dos filtros ativos
+  const infos=[];
+  if(APP.mesGlobal) infos.push('Mês: '+APP.mesGlobal);
+  const loja=document.getElementById('f-loja')?.value; if(loja) infos.push('Loja: '+loja);
+  const motivo=document.getElementById('f-motivo')?.value; if(motivo) infos.push('Motivo: '+motivo);
+  const sf=APP.statusFiltros||[]; if(sf.length) infos.push('Status: '+sf.join(', '));
+  const comp=document.getElementById('f-comp')?.value; if(comp) infos.push('Comprador: '+comp);
+  const busca=document.getElementById('f-busca')?.value; if(busca) infos.push('Busca: "'+busca+'"');
+  if(infos.length) txt+='Filtros: '+infos.join(' | ')+'\n';
+  txt+=`Registros: ${d.length} | Total: R$ ${d.reduce((a,b)=>a+(b.valor||0),0).toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,'.')}\n`;
+  txt+=new Date().toLocaleString('pt-BR')+'\n';
+  txt+=sep+'\n';
+  txt+=pad('MÊS',10)+pad('LOJA',6)+pad('MARCA',28)+pad('ROMANEIO',12)+pad('MOTIVO',12)+pad('VALOR',12)+pad('STATUS',14)+'COMPRADOR\n';
+  txt+=sep+'\n';
+  // Agrupa por mês e loja para melhor leitura
+  let lastMes='';
+  d.forEach(x=>{
+    if(x.mes!==lastMes){
+      if(lastMes) txt+='\n';
+      txt+=`── ${x.mes||'-'} ${'─'.repeat(80-4-(x.mes||'').length)}\n`;
+      lastMes=x.mes||'';
+    }
+    txt+=pad(x.mes||'-',10)+pad(x.loja||'-',6)+pad(x.marca||'-',28)+pad(x.romaneio||'-',12)+pad(x.motivo||'-',12)+pad('R$'+(x.valor||0).toFixed(2),12)+pad(x.status||'-',14)+(x.comprador||'-')+'\n';
+  });
+  txt+=sep+'\n';
+  txt+=`TOTAL GERAL: R$ ${d.reduce((a,b)=>a+(b.valor||0),0).toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,'.')}\n`;
+  const blob=new Blob([txt],{type:'text/plain;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=_nomeArquivo('txt');a.click();
+  toast(`✓ TXT exportado — ${d.length} registros`,'green');
+  document.getElementById('export-panel')?.classList.remove('open');
+}
+
+// ══ NOVO ROMANEIO MANUAL ══
+function abrirNovoRomaneio(){
+  const old=document.getElementById('novo-rom-overlay');if(old)old.remove();
+  const mesesOpts=['AGO/2025','SET/2025','OUT/2025','NOV/2025','DEZ/2025','JAN/2026','FEV/2026','MAR/2026','ABR/2026','MAI/2026','JUN/2026','JUL/2026','AGO/2026','SET/2026','OUT/2026','NOV/2026','DEZ/2026','JAN/2027']
+    .map(m=>`<option value="${m}" ${APP.mesGlobal===m?'selected':''}>${m}</option>`).join('');
+  const overlay=document.createElement('div');
+  overlay.className='edit-modal-overlay';overlay.id='novo-rom-overlay';
+  overlay.innerHTML=`
+    <div class="edit-modal" onclick="event.stopPropagation()" style="max-width:500px">
+      <h3>＋ Adicionar Romaneio</h3>
+      <div class="edit-grid">
+        <div class="edit-fg">
+          <div class="edit-lbl">Mês <span style="color:var(--red)">*</span></div>
+          <select id="nr-mes" class="edit-input">${mesesOpts}</select>
+        </div>
+        <div class="edit-fg">
+          <div class="edit-lbl">Loja <span style="color:var(--red)">*</span></div>
+          <input id="nr-loja" class="edit-input" placeholder="Ex: 3" type="number" min="1">
+        </div>
+        <div class="edit-fg full">
+          <div class="edit-lbl">Marca / Fornecedor <span style="color:var(--red)">*</span></div>
+          <input id="nr-marca" class="edit-input" placeholder="Ex: AMEND" style="text-transform:uppercase">
+        </div>
+        <div class="edit-fg">
+          <div class="edit-lbl">Romaneio <span style="color:var(--red)">*</span></div>
+          <input id="nr-romaneio" class="edit-input" placeholder="Nº do romaneio">
+        </div>
+        <div class="edit-fg">
+          <div class="edit-lbl">Valor (R$) <span style="color:var(--red)">*</span></div>
+          <input id="nr-valor" class="edit-input" type="number" step="0.01" min="0" placeholder="0,00">
+        </div>
+        <div class="edit-fg">
+          <div class="edit-lbl">Motivo <span style="color:var(--red)">*</span></div>
+          <select id="nr-motivo" class="edit-input">
+            <option value="VALIDADE">Validade</option>
+            <option value="DANIFICADO">Danificado</option>
+            <option value="ALTERADO">Alterado</option>
+          </select>
+        </div>
+        <div class="edit-fg">
+          <div class="edit-lbl">Status</div>
+          <select id="nr-status" class="edit-input">
+            <option value="PENDENTE">Pendente</option>
+            <option value="EXTRAÍDO">Extraído</option>
+            <option value="NOTA_EMITIDA">Nota Emitida</option>
+            <option value="RETIRADO">Retirado</option>
+            <option value="DESCARTE">Descarte</option>
+          </select>
+        </div>
+        <div class="edit-fg">
+          <div class="edit-lbl">Comprador / Responsável</div>
+          <input id="nr-comp" class="edit-input" placeholder="Nome" style="text-transform:uppercase">
+        </div>
+      </div>
+      <div style="font-size:10px;color:var(--text-dim);margin-bottom:14px">* Campos obrigatórios</div>
+      <div class="edit-actions">
+        <button class="btn btn-outline" onclick="fecharNovoRomaneio()">Cancelar</button>
+        <button class="btn btn-amber" id="nr-save-btn" onclick="salvarNovoRomaneio()">＋ Adicionar</button>
+      </div>
+    </div>`;
+  overlay.addEventListener('click',fecharNovoRomaneio);
+  overlay._escFn=e=>{if(e.key==='Escape')fecharNovoRomaneio();};
+  document.addEventListener('keydown',overlay._escFn);
+  document.body.appendChild(overlay);
+  setTimeout(()=>document.getElementById('nr-loja')?.focus(),100);
+}
+
+function fecharNovoRomaneio(){
+  const o=document.getElementById('novo-rom-overlay');
+  if(o){document.removeEventListener('keydown',o._escFn);o.remove();}
+}
+
+async function salvarNovoRomaneio(){
+  const mes=document.getElementById('nr-mes').value;
+  const loja=document.getElementById('nr-loja').value.trim();
+  const marca=document.getElementById('nr-marca').value.trim().toUpperCase();
+  const romaneio=document.getElementById('nr-romaneio').value.trim();
+  const valor=parseFloat(document.getElementById('nr-valor').value)||0;
+  const motivo=document.getElementById('nr-motivo').value;
+  const status=document.getElementById('nr-status').value;
+  const comprador=document.getElementById('nr-comp').value.trim().toUpperCase();
+
+  // Validação
+  const erros=[];
+  if(!loja) erros.push('Loja');
+  if(!marca) erros.push('Marca');
+  if(!romaneio) erros.push('Romaneio');
+  if(valor<=0) erros.push('Valor (deve ser maior que zero)');
+  if(erros.length){toast('⚠ Preencha: '+erros.join(', '),'amber');return;}
+
+  const btn=document.getElementById('nr-save-btn');
+  if(btn){btn.disabled=true;btn.textContent='Salvando...';}
+
+  const novoItem={mes,loja,marca,romaneio,valor:Math.round(valor*100)/100,motivo,status,comprador,obs:''};
+
+  try{
+    const ref=doc(collection(db,'romaneios'));
+    await setDoc(ref,novoItem);
+    const itemComId={...novoItem,_docId:ref.id};
+    APP.dados.push(itemComId);
+    populateMesSelects();initFilters();
+    applyFilters();
+    renderDashboard();
+    fecharNovoRomaneio();
+    toast(`✅ Romaneio ${romaneio} adicionado — ${marca}`,'green');
+  }catch(e){
+    toast('❌ Erro ao salvar: '+e.message,'red');
+    if(btn){btn.disabled=false;btn.textContent='＋ Adicionar';}
+  }
 }
 
 // ══ DRAG DROP ══
@@ -948,7 +1153,9 @@ document.addEventListener('DOMContentLoaded',()=>{
 // ══ EXPOR GLOBAIS ══
 Object.assign(window,{showTab,filtrarMes,applyFilters,resetFilters,sortBy,setChip,
   marcarFiltrados,renderPicker,selMarca,copiarExtracao,handleXlsx,importarPaste,
-  renderHistorico,remMes,excluirRegistro,exportarCSV,fazerLogin,fazerLogout,seedDadosIniciais,goP,
+  renderHistorico,remMes,excluirRegistro,exportarCSV,exportarExcel,exportarTXT,
+  toggleExportDd,abrirNovoRomaneio,fecharNovoRomaneio,salvarNovoRomaneio,
+  fazerLogin,fazerLogout,seedDadosIniciais,goP,
   toggleStatusDd,toggleStatusOpt,applyStatusFilter,abrirEdicao,fecharEdicao,salvarEdicao});
 </script>
 
@@ -1052,6 +1259,12 @@ select:focus,input[type=text]:focus{border-color:var(--amber)}
 select{cursor:pointer}input[type=text]::placeholder{color:var(--text-dim)}
 .table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden}
 .table-hdr{padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.export-dd{position:relative;display:inline-block}
+.export-panel{display:none;position:absolute;top:100%;right:0;z-index:300;background:var(--surface);border:1px solid var(--border2);border-radius:8px;padding:4px 0;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,.4);margin-top:4px}
+.export-panel.open{display:block}
+.export-opt{display:flex;align-items:center;gap:9px;padding:8px 14px;cursor:pointer;font-size:12px;color:var(--text-mid);transition:background .1s;white-space:nowrap}
+.export-opt:hover{background:var(--surface2);color:var(--text)}
+.export-opt span{font-size:14px}
 .table-info{font-size:12px;color:var(--text-dim)}.table-info strong{color:var(--text)}
 .table-scroll{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:12px}
@@ -1282,11 +1495,24 @@ td{padding:8px 11px;color:var(--text-mid);vertical-align:middle;white-space:nowr
       <div class="table-wrap">
         <div class="table-hdr">
           <div class="table-info" id="table-info"></div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap" data-role="admin,editor">
-            <button class="btn btn-sm btn-blue" onclick="marcarFiltrados('EXTRAÍDO')">📤 Extraído</button>
-            <button class="btn btn-sm btn-green" onclick="marcarFiltrados('NOTA_EMITIDA')">✓ Nota Emitida</button>
-            <button class="btn btn-sm btn-outline" style="color:var(--green);border-color:var(--green)" onclick="marcarFiltrados('RETIRADO')">✅ Retirado</button>
-            <button class="btn btn-sm btn-outline" style="color:var(--orange);border-color:var(--orange)" onclick="marcarFiltrados('DESCARTE')">🗑 Descarte</button>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            <div class="export-dd" id="export-dd">
+              <button class="btn btn-sm btn-outline" onclick="toggleExportDd()" style="gap:5px">⬇ Exportar <span style="font-size:9px;opacity:.6">▾</span></button>
+              <div class="export-panel" id="export-panel">
+                <div class="export-opt" onclick="exportarExcel()"><span>📊</span> Excel (.xlsx) — filtrados</div>
+                <div class="export-opt" onclick="exportarCSV()"><span>📄</span> CSV — filtrados</div>
+                <div class="export-opt" onclick="exportarTXT()"><span>📝</span> TXT — filtrados</div>
+              </div>
+            </div>
+            <div style="width:1px;height:20px;background:var(--border);margin:0 2px"></div>
+            <button class="btn btn-sm btn-amber" data-role="admin,editor" onclick="abrirNovoRomaneio()">＋ Novo Romaneio</button>
+            <div style="width:1px;height:20px;background:var(--border);margin:0 2px" data-role="admin,editor"></div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap" data-role="admin,editor">
+              <button class="btn btn-sm btn-blue" onclick="marcarFiltrados('EXTRAÍDO')">📤 Extraído</button>
+              <button class="btn btn-sm btn-green" onclick="marcarFiltrados('NOTA_EMITIDA')">✓ Nota Emitida</button>
+              <button class="btn btn-sm btn-outline" style="color:var(--green);border-color:var(--green)" onclick="marcarFiltrados('RETIRADO')">✅ Retirado</button>
+              <button class="btn btn-sm btn-outline" style="color:var(--orange);border-color:var(--orange)" onclick="marcarFiltrados('DESCARTE')">🗑 Descarte</button>
+            </div>
           </div>
         </div>
         <div class="table-scroll">
