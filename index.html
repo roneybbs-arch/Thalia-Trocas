@@ -73,6 +73,15 @@ const fmtK = v => v>=1000 ? 'R$'+(v/1000).toFixed(1).replace('.',',')+'k' : fmt(
 const mesOrder = ['AGO/2025','SET/2025','OUT/2025','NOV/2025','DEZ/2025',
   'JAN/2026','FEV/2026','MAR/2026','ABR/2026','MAI/2026','JUN/2026',
   'JUL/2026','AGO/2026','SET/2026','OUT/2026','NOV/2026','DEZ/2026','JAN/2027'];
+function mesIdx(m){ return mesOrder.indexOf(m); }
+function mesInRange(m, de, ate){
+  const im=mesIdx(m), id=mesIdx(de), ia=mesIdx(ate);
+  if(im<0) return true; // mês desconhecido: não filtra
+  if(id>=0 && ia>=0) return im>=id && im<=ia;
+  if(id>=0) return im>=id;
+  if(ia>=0) return im<=ia;
+  return true;
+}
 
 function getMeses() {
   return [...new Set(APP.dados.map(d=>d.mes||''))].filter(Boolean)
@@ -343,7 +352,8 @@ function filtrarMes() {
 function populateMesSelects() {
   const meses = getMeses();
   ['mes-global','f-mes'].forEach(id => {
-    const el = document.getElementById(id); const cur = el.value;
+    const el = document.getElementById(id); if(!el) return;
+    const cur = el.value;
     while(el.options.length>1) el.remove(1);
     meses.forEach(m => { const o=new Option(m,m); if(m===cur) o.selected=true; el.add(o); });
   });
@@ -474,12 +484,81 @@ function setChip(k){
   applyFilters();
 }
 
+// ══ PERIOD PICKER ══
+function togglePeriodDd(){
+  const panel=document.getElementById('period-dd-panel');
+  if(!panel) return;
+  const isOpen=panel.style.display!=='none';
+  panel.style.display=isOpen?'none':'block';
+  if(!isOpen) populatePeriodSelects();
+}
+window.togglePeriodDd=togglePeriodDd;
+
+function populatePeriodSelects(){
+  const meses=getMeses();
+  ['f-periodo-de','f-periodo-ate'].forEach(id=>{
+    const el=document.getElementById(id); if(!el) return;
+    const cur=el.value;
+    while(el.options.length>1) el.remove(1);
+    meses.forEach(m=>{const o=new Option(m,m);if(m===cur)o.selected=true;el.add(o);});
+  });
+  // Presets
+  const grid=document.getElementById('period-presets-grid');
+  if(!grid) return;
+  // Last 3 months
+  const presets=[];
+  if(meses.length>=1) presets.push({label:'Último mês', de:meses[meses.length-1], ate:meses[meses.length-1]});
+  if(meses.length>=3) presets.push({label:'Últ. 3 meses', de:meses[meses.length-3], ate:meses[meses.length-1]});
+  if(meses.length>=6) presets.push({label:'Últ. 6 meses', de:meses[meses.length-6], ate:meses[meses.length-1]});
+  presets.push({label:'Tudo', de:'', ate:''});
+  // 2025 / 2026 year presets
+  const anos=[...new Set(meses.map(m=>m.split('/')[1]))].sort();
+  anos.forEach(ano=>{
+    const doAno=meses.filter(m=>m.endsWith('/'+ano));
+    if(doAno.length>0) presets.push({label:'Ano '+ano, de:doAno[0], ate:doAno[doAno.length-1]});
+  });
+  grid.innerHTML=presets.map(p=>`
+    <button class="period-preset-btn" onclick="window.applyPreset('${p.de}','${p.ate}')">${p.label}</button>
+  `).join('');
+}
+
+function applyPreset(de, ate){
+  const elDe=document.getElementById('f-periodo-de');
+  const elAte=document.getElementById('f-periodo-ate');
+  if(elDe) elDe.value=de;
+  if(elAte) elAte.value=ate;
+  updatePeriodLabel();
+  applyFilters();
+}
+window.applyPreset=applyPreset;
+
+function clearPeriod(){
+  const elDe=document.getElementById('f-periodo-de');
+  const elAte=document.getElementById('f-periodo-ate');
+  if(elDe) elDe.value='';
+  if(elAte) elAte.value='';
+  updatePeriodLabel();
+  applyFilters();
+}
+window.clearPeriod=clearPeriod;
+
+// Close period panel on outside click
+document.addEventListener('click',function(e){
+  const btn=document.getElementById('period-dd-btn');
+  const panel=document.getElementById('period-dd-panel');
+  if(btn&&panel&&!btn.contains(e.target)&&!panel.contains(e.target)){
+    panel.style.display='none';
+  }
+});
+
 function applyFilters(){
   const busca=document.getElementById('f-busca').value.toLowerCase();
   const loja=document.getElementById('f-loja').value;
   const motivo=document.getElementById('f-motivo').value;
   const comp=document.getElementById('f-comp').value;
-  const mes=document.getElementById('f-mes').value;
+  const mes=document.getElementById('f-mes').value; // filtro mês exato (legado)
+  const periDe=document.getElementById('f-periodo-de')?.value||'';
+  const periAte=document.getElementById('f-periodo-ate')?.value||'';
   const statusFiltros=APP.statusFiltros||[];
   APP.filtrados=dadosAtivos().filter(d=>{
     if(busca&&!d.marca?.toLowerCase().includes(busca)&&!d.romaneio?.includes(busca)) return false;
@@ -487,25 +566,45 @@ function applyFilters(){
     if(motivo&&d.motivo!==motivo) return false;
     if(statusFiltros.length>0&&!statusFiltros.includes(d.status)) return false;
     if(comp&&d.comprador!==comp) return false;
-    if(mes&&d.mes!==mes) return false;
+    // Filtro de período — se preenchido, sobrepõe o filtro de mês simples
+    if(periDe||periAte){
+      if(!mesInRange(d.mes, periDe, periAte)) return false;
+    } else if(mes&&d.mes!==mes){
+      return false;
+    }
     return true;
   });
   APP.page=1; renderStatusStrip(); renderTable();
 }
 
 function resetFilters(){
-  ['f-busca','f-loja','f-motivo','f-comp','f-mes'].forEach(id=>{
+  ['f-busca','f-loja','f-motivo','f-comp','f-mes','f-periodo-de','f-periodo-ate'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.value='';
   });
   APP.chipFilter=''; APP.statusFiltros=[];
-  // Resetar checkboxes
   document.getElementById('sd-ALL').checked=true;
   ['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','RETIRADO','DESCARTE'].forEach(s=>{
     const el=document.getElementById('sd-'+s); if(el) el.checked=false;
   });
   const lbl=document.getElementById('status-dd-label'); if(lbl) lbl.textContent='Todos';
+  updatePeriodLabel();
   APP.filtrados=[...dadosAtivos()]; APP.page=1; renderStatusStrip(); renderTable();
 }
+
+function updatePeriodLabel(){
+  const de=document.getElementById('f-periodo-de')?.value||'';
+  const ate=document.getElementById('f-periodo-ate')?.value||'';
+  const lbl=document.getElementById('period-label');
+  if(!lbl) return;
+  if(!de&&!ate){ lbl.textContent='Período'; lbl.style.color='var(--text-dim)'; return; }
+  if(de&&ate&&de===ate){ lbl.textContent=de; }
+  else if(de&&ate){ lbl.textContent=de+' → '+ate; }
+  else if(de){ lbl.textContent='A partir de '+de; }
+  else { lbl.textContent='Até '+ate; }
+  lbl.style.color='var(--amber)';
+}
+window.updatePeriodLabel=updatePeriodLabel;
+window.resetFilters=resetFilters;
 
 function sortBy(col){
   if(APP.sortCol===col) APP.sortDir*=-1; else{APP.sortCol=col;APP.sortDir=1;}
@@ -1445,6 +1544,23 @@ select{cursor:pointer}input[type=text]::placeholder{color:var(--text-dim)}
 .sd-item{display:flex;align-items:center;gap:8px;padding:7px 14px;cursor:pointer;font-size:12px;transition:background .1s}
 .sd-item:hover{background:var(--surface2)}
 .sd-item input[type=checkbox]{accent-color:var(--amber);cursor:pointer;width:13px;height:13px}
+/* ── PERIOD PICKER ── */
+.period-btn{display:flex;align-items:center;gap:7px;background:var(--bg2);border:1.5px solid var(--border);color:var(--text);border-radius:7px;padding:6px 10px;cursor:pointer;min-width:160px;font-size:12px;user-select:none;transition:border-color .15s}
+.period-btn:hover{border-color:var(--amber)}
+.period-panel{position:absolute;top:calc(100% + 4px);left:0;z-index:300;background:var(--surface);border:1.5px solid var(--border2);border-radius:var(--radius);box-shadow:var(--shadow-lg);min-width:320px}
+.period-panel-inner{padding:16px}
+.period-row{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.period-col{display:flex;flex-direction:column;gap:4px;flex:1}
+.period-col-label{font-size:10px;font-weight:600;color:var(--text-dim);letter-spacing:.05em;text-transform:uppercase}
+.period-select{font-family:var(--sans);font-size:13px;background:var(--bg2);border:1.5px solid var(--border);color:var(--text);border-radius:7px;padding:7px 10px;outline:none;width:100%;cursor:pointer}
+.period-select:focus{border-color:var(--amber)}
+.period-arrow{font-size:16px;color:var(--text-dim);flex-shrink:0;padding-top:18px}
+.period-presets{margin-bottom:14px}
+.period-preset-label{font-size:10px;font-weight:600;color:var(--text-dim);letter-spacing:.05em;text-transform:uppercase;margin-bottom:8px}
+.period-presets-grid{display:flex;flex-wrap:wrap;gap:6px}
+.period-preset-btn{font-family:var(--sans);font-size:11px;padding:4px 10px;border-radius:20px;border:1.5px solid var(--border2);background:var(--surface2);color:var(--text-mid);cursor:pointer;transition:all .15s}
+.period-preset-btn:hover{background:var(--amber-bg);border-color:var(--amber-border);color:var(--amber)}
+.period-actions{display:flex;justify-content:flex-end;gap:8px;padding-top:10px;border-top:1px solid var(--border)}
 
 /* ── TABLE ── */
 .table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
@@ -1703,7 +1819,43 @@ document.addEventListener('DOMContentLoaded', function(){
       <div class="status-strip" id="status-strip"></div>
       <div class="filters-bar">
         <div class="fg"><div class="flbl">Busca</div><input type="text" id="f-busca" placeholder="Marca ou romaneio..." oninput="window.applyFilters&&window.applyFilters()" style="min-width:180px"></div>
-        <div class="fg"><div class="flbl">Mês</div><select id="f-mes" onchange="window.applyFilters&&window.applyFilters()"><option value="">Todos</option></select></div>
+        <div class="fg period-fg" style="position:relative">
+          <div class="flbl">Período</div>
+          <div id="period-dd-btn" class="period-btn" onclick="window.togglePeriodDd&&window.togglePeriodDd()">
+            <span style="font-size:14px">📅</span>
+            <span id="period-label" style="flex:1">Período</span>
+            <span style="font-size:10px;opacity:.5">▾</span>
+          </div>
+          <div id="period-dd-panel" class="period-panel" style="display:none">
+            <div class="period-panel-inner">
+              <div class="period-row">
+                <div class="period-col">
+                  <div class="period-col-label">De</div>
+                  <select id="f-periodo-de" class="period-select" onchange="window.updatePeriodLabel&&window.updatePeriodLabel();window.applyFilters&&window.applyFilters()">
+                    <option value="">Início</option>
+                  </select>
+                </div>
+                <div class="period-arrow">→</div>
+                <div class="period-col">
+                  <div class="period-col-label">Até</div>
+                  <select id="f-periodo-ate" class="period-select" onchange="window.updatePeriodLabel&&window.updatePeriodLabel();window.applyFilters&&window.applyFilters()">
+                    <option value="">Fim</option>
+                  </select>
+                </div>
+              </div>
+              <div class="period-presets">
+                <div class="period-preset-label">Atalhos rápidos</div>
+                <div class="period-presets-grid" id="period-presets-grid"></div>
+              </div>
+              <div class="period-actions">
+                <button class="btn btn-sm btn-outline" onclick="window.clearPeriod&&window.clearPeriod()">✕ Limpar</button>
+                <button class="btn btn-sm btn-amber" onclick="window.togglePeriodDd&&window.togglePeriodDd()">Aplicar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Mês exato (hidden, usado internamente) -->
+        <select id="f-mes" style="display:none" onchange="window.applyFilters&&window.applyFilters()"><option value="">Todos</option></select>
         <div class="fg"><div class="flbl">Loja</div><select id="f-loja" onchange="window.applyFilters&&window.applyFilters()"><option value="">Todas</option></select></div>
         <div class="fg"><div class="flbl">Motivo</div>
           <select id="f-motivo" onchange="window.applyFilters&&window.applyFilters()"><option value="">Todos</option><option>VALIDADE</option><option>DANIFICADO</option><option>ALTERADO</option></select>
