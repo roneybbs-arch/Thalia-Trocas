@@ -7,7 +7,16 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
-<!-- Firebase SDKs -->
+<!-- Firebase SDKs (importmap para compatibilidade) -->
+<script type="importmap">
+{
+  "imports": {
+    "firebase/app": "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
+    "firebase/auth": "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js",
+    "firebase/firestore": "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js"
+  }
+}
+</script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
@@ -125,10 +134,13 @@ async function fazerLogin() {
     btn.disabled = false; btn.textContent = 'Entrar';
   }
 }
+// Expor login imediatamente após definição
+window.fazerLogin = fazerLogin;
 
 async function fazerLogout() {
   await signOut(auth);
 }
+window.fazerLogout = fazerLogout;
 
 function showLogin() {
   document.getElementById('login-screen').style.display = 'flex';
@@ -901,7 +913,7 @@ function abrirEdicao(docId){
         </div>
       </div>
       <div class="edit-actions">
-        <button class="btn btn-outline" onclick="fecharEdicao()">Cancelar</button>
+        <button class="btn btn-outline" onclick="window.fecharEdicao&&window.fecharEdicao()">Cancelar</button>
         <button class="btn btn-amber" onclick="salvarEdicao('${docId}')">💾 Salvar</button>
       </div>
     </div>`;
@@ -1141,8 +1153,8 @@ function abrirNovoRomaneio(){
       </div>
       <div style="font-size:10px;color:var(--text-dim);margin-bottom:14px">* Campos obrigatórios</div>
       <div class="edit-actions">
-        <button class="btn btn-outline" onclick="fecharNovoRomaneio()">Cancelar</button>
-        <button class="btn btn-amber" id="nr-save-btn" onclick="salvarNovoRomaneio()">＋ Adicionar</button>
+        <button class="btn btn-outline" onclick="window.fecharNovoRomaneio&&window.fecharNovoRomaneio()">Cancelar</button>
+        <button class="btn btn-amber" id="nr-save-btn" onclick="window.salvarNovoRomaneio&&window.salvarNovoRomaneio()">＋ Adicionar</button>
       </div>
     </div>`;
   overlay.addEventListener('click',fecharNovoRomaneio);
@@ -1204,6 +1216,7 @@ function toggleTheme(){
   document.getElementById('theme-toggle').textContent = isDark ? '🌙' : '☀️';
   try{ localStorage.setItem('thalia-theme', isDark?'light':'dark'); }catch(e){}
 }
+window.toggleTheme = toggleTheme;
 (function(){
   try{
     const saved=localStorage.getItem('thalia-theme');
@@ -1604,7 +1617,7 @@ document.addEventListener('DOMContentLoaded', function(){
       <label class="form-label">Senha</label>
       <input type="password" id="login-senha" class="form-input" placeholder="••••••••" autocomplete="current-password">
     </div>
-    <button id="login-btn" class="login-btn" onclick="fazerLogin()">Entrar</button>
+    <button id="login-btn" class="login-btn" onclick="window.fazerLogin&&window.fazerLogin()">Entrar</button>
     <div id="login-erro" class="login-erro"></div>
   </div>
 </div>
@@ -1620,29 +1633,29 @@ document.addEventListener('DOMContentLoaded', function(){
       <div class="brand-label">Gestão de Trocas</div>
     </div>
     <div class="topbar-center">
-      <select class="mes-filter" id="mes-global" onchange="filtrarMes()"><option value="">Todos os períodos</option></select>
+      <select class="mes-filter" id="mes-global" onchange="window.filtrarMes&&window.filtrarMes()"><option value="">Todos os períodos</option></select>
       <div class="tag-periodo" id="tag-periodo">TODOS OS PERÍODOS</div>
     </div>
     <div class="topbar-right">
-      <button id="theme-toggle" class="theme-toggle" onclick="toggleTheme()" title="Alternar modo escuro/claro">🌙</button>
-      <button class="btn btn-outline" onclick="exportarCSV()">⬇ CSV</button>
+      <button id="theme-toggle" class="theme-toggle" onclick="window.toggleTheme&&window.toggleTheme()" title="Alternar modo escuro/claro">🌙</button>
+      <button class="btn btn-outline" onclick="window.exportarCSV&&window.exportarCSV()">⬇ CSV</button>
       <div class="user-pill">
         <div class="user-avatar" id="user-avatar">U</div>
         <div class="user-info">
           <div class="user-name-el" id="user-name">–</div>
           <div class="user-role-el" id="user-role">–</div>
         </div>
-        <button class="btn btn-outline btn-sm" onclick="fazerLogout()" style="margin-left:4px">Sair</button>
+        <button class="btn btn-outline btn-sm" onclick="window.fazerLogout&&window.fazerLogout()" style="margin-left:4px">Sair</button>
       </div>
     </div>
   </div>
 
   <!-- NAV -->
   <div class="nav-tabs">
-    <div class="nav-tab active" id="tab-dashboard" onclick="showTab('dashboard')">📊 Dashboard</div>
-    <div class="nav-tab" id="tab-gestao" onclick="showTab('gestao')">📋 Gestão <span class="cnt" id="cnt-gestao">0</span></div>
-    <div class="nav-tab" id="tab-extracao" onclick="showTab('extracao')">📄 Extração</div>
-    <div class="nav-tab" data-role="admin,editor" id="tab-importar" onclick="showTab('importar')">➕ Importar</div>
+    <div class="nav-tab active" id="tab-dashboard" onclick="window.showTab&&window.showTab('dashboard')">📊 Dashboard</div>
+    <div class="nav-tab" id="tab-gestao" onclick="window.showTab&&window.showTab('gestao')">📋 Gestão <span class="cnt" id="cnt-gestao">0</span></div>
+    <div class="nav-tab" id="tab-extracao" onclick="window.showTab&&window.showTab('extracao')">📄 Extração</div>
+    <div class="nav-tab" data-role="admin,editor" id="tab-importar" onclick="window.showTab&&window.showTab('importar')">➕ Importar</div>
   </div>
 
   <div class="main">
@@ -1650,7 +1663,7 @@ document.addEventListener('DOMContentLoaded', function(){
     <!-- SEED BANNER -->
     <div class="seed-banner" id="seed-banner" data-role="admin">
       <p>⚠️ <strong>Banco de dados vazio.</strong> Clique para importar os dados históricos (AGO/2025 → ABR/2026) para o Firebase.</p>
-      <button class="btn btn-amber" onclick="seedDadosIniciais()">🚀 Importar Dados Históricos</button>
+      <button class="btn btn-amber" onclick="window.seedDadosIniciais&&window.seedDadosIniciais()">🚀 Importar Dados Históricos</button>
     </div>
 
     <!-- DASHBOARD -->
@@ -1689,11 +1702,11 @@ document.addEventListener('DOMContentLoaded', function(){
     <div class="section" id="section-gestao">
       <div class="status-strip" id="status-strip"></div>
       <div class="filters-bar">
-        <div class="fg"><div class="flbl">Busca</div><input type="text" id="f-busca" placeholder="Marca ou romaneio..." oninput="applyFilters()" style="min-width:180px"></div>
-        <div class="fg"><div class="flbl">Mês</div><select id="f-mes" onchange="applyFilters()"><option value="">Todos</option></select></div>
-        <div class="fg"><div class="flbl">Loja</div><select id="f-loja" onchange="applyFilters()"><option value="">Todas</option></select></div>
+        <div class="fg"><div class="flbl">Busca</div><input type="text" id="f-busca" placeholder="Marca ou romaneio..." oninput="window.applyFilters&&window.applyFilters()" style="min-width:180px"></div>
+        <div class="fg"><div class="flbl">Mês</div><select id="f-mes" onchange="window.applyFilters&&window.applyFilters()"><option value="">Todos</option></select></div>
+        <div class="fg"><div class="flbl">Loja</div><select id="f-loja" onchange="window.applyFilters&&window.applyFilters()"><option value="">Todas</option></select></div>
         <div class="fg"><div class="flbl">Motivo</div>
-          <select id="f-motivo" onchange="applyFilters()"><option value="">Todos</option><option>VALIDADE</option><option>DANIFICADO</option><option>ALTERADO</option></select>
+          <select id="f-motivo" onchange="window.applyFilters&&window.applyFilters()"><option value="">Todos</option><option>VALIDADE</option><option>DANIFICADO</option><option>ALTERADO</option></select>
         </div>
         <div class="fg" style="position:relative">
           <div class="flbl">Status</div>
@@ -1711,8 +1724,8 @@ document.addEventListener('DOMContentLoaded', function(){
             <label class="sd-item" onclick="toggleStatusOpt('DESCARTE')"><input type="checkbox" id="sd-DESCARTE" onchange="applyStatusFilter()"><span style="color:#f97316">● Descarte</span></label>
           </div>
         </div>
-        <div class="fg"><div class="flbl">Comprador</div><select id="f-comp" onchange="applyFilters()"><option value="">Todos</option></select></div>
-        <div class="fg"><button class="btn btn-outline" onclick="resetFilters()">✕ Limpar</button></div>
+        <div class="fg"><div class="flbl">Comprador</div><select id="f-comp" onchange="window.applyFilters&&window.applyFilters()"><option value="">Todos</option></select></div>
+        <div class="fg"><button class="btn btn-outline" onclick="window.resetFilters&&window.resetFilters()">✕ Limpar</button></div>
       </div>
       <div id="resumo-filtro" class="resumo-filtro" style="display:none"></div>
       <div class="table-wrap">
@@ -1720,15 +1733,15 @@ document.addEventListener('DOMContentLoaded', function(){
           <div class="table-info" id="table-info"></div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
             <div class="export-dd" id="export-dd">
-              <button class="btn btn-sm btn-outline" onclick="toggleExportDd()" style="gap:5px">⬇ Exportar <span style="font-size:9px;opacity:.6">▾</span></button>
+              <button class="btn btn-sm btn-outline" onclick="window.toggleExportDd&&window.toggleExportDd()" style="gap:5px">⬇ Exportar <span style="font-size:9px;opacity:.6">▾</span></button>
               <div class="export-panel" id="export-panel">
-                <div class="export-opt" onclick="exportarExcel()"><span>📊</span> Excel (.xlsx) — filtrados</div>
-                <div class="export-opt" onclick="exportarCSV()"><span>📄</span> CSV — filtrados</div>
-                <div class="export-opt" onclick="exportarTXT()"><span>📝</span> TXT — filtrados</div>
+                <div class="export-opt" onclick="window.exportarExcel&&window.exportarExcel()"><span>📊</span> Excel (.xlsx) — filtrados</div>
+                <div class="export-opt" onclick="window.exportarCSV&&window.exportarCSV()"><span>📄</span> CSV — filtrados</div>
+                <div class="export-opt" onclick="window.exportarTXT&&window.exportarTXT()"><span>📝</span> TXT — filtrados</div>
               </div>
             </div>
             <div style="width:1px;height:20px;background:var(--border);margin:0 2px"></div>
-            <button class="btn btn-sm btn-amber" data-role="admin,editor" onclick="abrirNovoRomaneio()">＋ Novo Romaneio</button>
+            <button class="btn btn-sm btn-amber" data-role="admin,editor" onclick="window.abrirNovoRomaneio&&window.abrirNovoRomaneio()">＋ Novo Romaneio</button>
             <div style="width:1px;height:20px;background:var(--border);margin:0 2px" data-role="admin,editor"></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap" data-role="admin,editor">
               <button class="btn btn-sm btn-blue" onclick="marcarFiltrados('EXTRAÍDO')">📤 Extraído</button>
@@ -1756,7 +1769,7 @@ document.addEventListener('DOMContentLoaded', function(){
       <div class="extracao-wrap">
         <div class="marca-picker">
           <div class="picker-hdr"><h3>Selecionar Marca</h3></div>
-          <div class="picker-search"><input type="text" id="picker-q" placeholder="Buscar marca..." oninput="renderPicker()" style="width:100%"></div>
+          <div class="picker-search"><input type="text" id="picker-q" placeholder="Buscar marca..." oninput="window.renderPicker&&window.renderPicker()" style="width:100%"></div>
           <div class="picker-list" id="picker-list"></div>
         </div>
         <div class="extracao-result">
@@ -1787,7 +1800,7 @@ document.addEventListener('DOMContentLoaded', function(){
             </div>
           </div>
           <div class="drop-zone" id="drop-zone">
-            <input type="file" accept=".xlsx,.xls" onchange="handleXlsx(event)">
+            <input type="file" accept=".xlsx,.xls" onchange="window.handleXlsx&&window.handleXlsx(event)">
             <div class="drop-icon">📊</div>
             <div class="drop-title">Arraste o .xlsx aqui ou clique para selecionar</div>
             <div class="drop-sub">Padrão Thalia: LOJA · MARCA · ROMANEIO · VALOR TOTAL · MOTIVO</div>
@@ -1807,7 +1820,7 @@ document.addEventListener('DOMContentLoaded', function(){
           </div>
           <textarea class="paste-area" id="paste-area" placeholder="Cole os dados do Excel aqui..."></textarea>
           <div style="display:flex;gap:8px;margin-top:10px">
-            <button class="btn btn-blue" onclick="importarPaste()" style="flex:1">⬆ Importar</button>
+            <button class="btn btn-blue" onclick="window.importarPaste&&window.importarPaste()" style="flex:1">⬆ Importar</button>
             <button class="btn btn-outline" onclick="document.getElementById('paste-area').value=''">Limpar</button>
           </div>
           <div class="import-log" id="paste-log">Aguardando dados...</div>
@@ -1825,5 +1838,38 @@ document.addEventListener('DOMContentLoaded', function(){
   </div><!-- /main -->
 </div><!-- /app-screen -->
 
+
+<!-- Fallback para garantir que o login funciona mesmo se o módulo demorar -->
+<script>
+(function() {
+  function tryWireLogin() {
+    var emailEl = document.getElementById('login-email');
+    var senhaEl = document.getElementById('login-senha');
+    var btnEl   = document.getElementById('login-btn');
+    if (!emailEl || !senhaEl || !btnEl) return;
+
+    // Garante que os campos estão habilitados
+    emailEl.disabled = false;
+    senhaEl.disabled = false;
+    btnEl.disabled   = false;
+
+    // Enter no campo de senha
+    senhaEl.removeEventListener('keydown', senhaEl._loginHandler || function(){});
+    senhaEl._loginHandler = function(e) {
+      if (e.key === 'Enter' && window.fazerLogin) window.fazerLogin();
+    };
+    senhaEl.addEventListener('keydown', senhaEl._loginHandler);
+  }
+  // Roda assim que o DOM existir
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', tryWireLogin);
+  } else {
+    tryWireLogin();
+  }
+  // Re-tenta após 500ms caso o módulo ainda não tivesse carregado
+  setTimeout(tryWireLogin, 500);
+  setTimeout(tryWireLogin, 1500);
+})();
+</script>
 </body>
 </html>
