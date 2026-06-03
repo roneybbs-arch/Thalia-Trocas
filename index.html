@@ -509,8 +509,8 @@ function dadosDashFinal(){
 }
 
 function renderDashboard() {
-  const d = dadosDashFinal();
-  const dAll = dadosDashboard(); // sem seleções, para contexto
+  const dAll = dadosDashboard();   // base do filtro do topo (sem seleções de clique)
+  const d    = dadosDashFinal();   // dAll + seleções de clique
   // Update filter tag
   const _de=document.getElementById('d-periodo-de')?.value||'';
   const _ate=document.getElementById('d-periodo-ate')?.value||'';
@@ -539,10 +539,11 @@ function renderDashboard() {
   const descarte = d.filter(x=>x.status==='DESCARTE').length;
   const valDesc  = d.filter(x=>x.status==='DESCARTE').reduce((a,b)=>a+b.valor,0);
 
-  const periodoLabel=activeFilters.length?activeFilters.join(' · '):'Todos os períodos';
+  const periodoLabel=allTags.length?allTags.filter(t=>typeof t==='string').join(' · '):'Todos os períodos';
+  const pctTotal=dAll.length>0?(d.length/dAll.length*100).toFixed(1):'100';
   document.getElementById('kpi-grid').innerHTML = `
     <div class="kpi c-amber"><div class="kpi-label">Valor Total</div><div class="kpi-val">${fmt(total)}</div><div class="kpi-sub">${periodoLabel}</div></div>
-    <div class="kpi c-blue"><div class="kpi-label">Romaneios</div><div class="kpi-val">${d.length.toLocaleString('pt-BR')}</div><div class="kpi-sub">registros</div></div>
+    <div class="kpi c-blue"><div class="kpi-label">Romaneios</div><div class="kpi-val">${d.length.toLocaleString('pt-BR')}</div><div class="kpi-sub">${hasSel?pctTotal+'% do total':'registros'}</div></div>
     <div class="kpi c-purple"><div class="kpi-label">Marcas</div><div class="kpi-val">${marcas}</div><div class="kpi-sub">fornecedores</div></div>
     <div class="kpi c-green"><div class="kpi-label">Lojas</div><div class="kpi-val">${lojas}</div><div class="kpi-sub">envolvidas</div></div>
     <div class="kpi c-amber"><div class="kpi-label">Nota Emitida</div><div class="kpi-val">${notaem}</div><div class="kpi-sub">resolvidos</div></div>
@@ -550,31 +551,41 @@ function renderDashboard() {
     <div class="kpi c-red"><div class="kpi-label">Pendentes</div><div class="kpi-val">${pendente}</div><div class="kpi-sub">aguardando</div></div>
     <div class="kpi c-orange"><div class="kpi-label">Descarte</div><div class="kpi-val">${descarte}</div><div class="kpi-sub">${fmt(valDesc)}</div></div>
   `;
-  // Top marcas — CLICÁVEIS
-  const byM={};
+  // Top marcas — CLICÁVEIS + REATIVAS
+  const byM={}, byMd={};
   dAll.forEach(x=>{const k=x.marca?.trim()||'';if(!byM[k])byM[k]={v:0,n:0};byM[k].v+=x.valor;byM[k].n++;});
+  d.forEach(x=>{const k=x.marca?.trim()||'';if(!byMd[k])byMd[k]={v:0,n:0};byMd[k].v+=x.valor;byMd[k].n++;});
   const sM=Object.entries(byM).sort((a,b)=>b[1].v-a[1].v).slice(0,12);
   const maxM=sM[0]?.[1]?.v||1;
+  const hasSel=Object.values(APP.dashSel).some(v=>v);
   document.getElementById('chart-marcas').innerHTML=sM.map(([m,v],i)=>{
     const sel=APP.dashSel.marca===m;
-    const dimmed=APP.dashSel.marca&&!sel;
+    const inFilter=!!byMd[m];
+    const dimmed=hasSel&&!inFilter&&!sel;
+    const dv=byMd[m]||{v:0,n:0};
     return `<div class="dash-bar-item ${sel?'dash-bar-sel':''} ${dimmed?'dash-bar-dim':''}"
       onclick="window.dashClick('marca','${m.replace(/'/g,"\'")}')" title="Clique para filtrar por ${m}">
       <div class="bar-header">
-        <span class="bar-label" style="font-weight:${sel?'600':'400'}">${i+1}. ${m}</span>
-        <span class="bar-val">${fmt(v.v)} · ${v.n} rom.</span>
+        <span class="bar-label" style="font-weight:${inFilter&&hasSel?'600':'400'}">${i+1}. ${m}</span>
+        <span class="bar-val">${hasSel&&inFilter?fmt(dv.v)+' · '+dv.n+' rom.':fmt(v.v)+' · '+v.n+' rom.'}</span>
       </div>
-      <div class="bar-track"><div class="bar-fill" style="width:${(v.v/maxM*100).toFixed(1)}%;background:${sel?'var(--amber)':i<3?'#e8a020':'#3b82f6'};transition:all .3s"></div></div>
+      <div class="bar-track" style="position:relative">
+        <div class="bar-fill" style="width:${(v.v/maxM*100).toFixed(1)}%;background:var(--border2);position:absolute;top:0;left:0;height:100%;border-radius:3px"></div>
+        <div class="bar-fill" style="width:${hasSel?(dv.v/maxM*100).toFixed(1):((v.v/maxM)*100).toFixed(1)}%;background:${sel?'var(--amber)':inFilter&&hasSel?'#f59e0b':i<3?'#e8a020':'#3b82f6'};position:relative;transition:width .4s,background .3s"></div>
+      </div>
     </div>`;
   }).join('');
-  // Pie motivos — CLICÁVEL
+  // Pie motivos — CLICÁVEL + REATIVO
   const motivos={VALIDADE:0,DANIFICADO:0,ALTERADO:0};
+  const motivosD={VALIDADE:0,DANIFICADO:0,ALTERADO:0};
   dAll.forEach(x=>{if(motivos[x.motivo]!==undefined)motivos[x.motivo]+=x.valor;});
-  const mT=Object.values(motivos).reduce((a,b)=>a+b,0)||1;
+  d.forEach(x=>{if(motivosD[x.motivo]!==undefined)motivosD[x.motivo]+=x.valor;});
+  const motivosShow=hasSel?motivosD:motivos;
+  const mT=Object.values(motivosShow).reduce((a,b)=>a+b,0)||1;
   const mC={VALIDADE:'#3b82f6',DANIFICADO:'#ef4444',ALTERADO:'#8b5cf6'};
   const mN={VALIDADE:'Validade',DANIFICADO:'Danificado',ALTERADO:'Alterado'};
   let sa=-Math.PI/2,ps='';
-  Object.entries(motivos).forEach(([k,v])=>{
+  Object.entries(motivosShow).forEach(([k,v])=>{
     const a=(v/mT)*2*Math.PI;
     const r=APP.dashSel.motivo===k?44:40;
     const x1=50+r*Math.cos(sa),y1=50+r*Math.sin(sa);
@@ -584,65 +595,72 @@ function renderDashboard() {
     sa+=a;
   });
   document.getElementById('pie-motivo').innerHTML=ps+'<circle cx="50" cy="50" r="14" fill="var(--surface)" style="pointer-events:none"/>';
-  document.getElementById('legend-motivo').innerHTML=Object.entries(motivos).map(([k,v])=>{
+  document.getElementById('legend-motivo').innerHTML=Object.entries(motivosShow).map(([k,v])=>{
     const sel=APP.dashSel.motivo===k;
     return `<div class="legend-item ${sel?'dash-legend-sel':''}" style="cursor:pointer;border-radius:4px;padding:2px 4px;transition:background .15s" onclick="window.dashClick('motivo','${k}')">
       <div class="legend-dot" style="background:${mC[k]};transform:${sel?'scale(1.3)':'scale(1)'};transition:transform .2s"></div>${mN[k]}<span class="legend-pct">${(v/mT*100).toFixed(1)}%</span>
     </div>`;
   }).join('');
-  // Evolução mensal — mostra todos os meses (contexto geral)
+  // Evolução mensal — REATIVA: usa dAll para contexto, d para highlight
   const meses=getMeses();
-  const byMes={};
-  // Para evolução usa APP.dados filtrado apenas por loja/marca/status (sem período)
-  // para que o usuário veja o histórico completo como contexto
-  const dEvo=APP.dados.filter(x=>{
-    const loja=document.getElementById('d-loja')?.value||'';
-    const marca=document.getElementById('d-marca')?.value||'';
-    const motivo=document.getElementById('d-motivo')?.value||'';
-    const status=document.getElementById('d-status')?.value||'';
-    const comp=document.getElementById('d-comp')?.value||'';
-    if(loja&&x.loja!==loja) return false;
-    if(marca&&x.marca?.trim()!==marca) return false;
-    if(motivo&&x.motivo!==motivo) return false;
-    if(status&&x.status!==status) return false;
-    if(comp&&x.comprador!==comp) return false;
-    return true;
-  });
-  dEvo.forEach(x=>{if(!byMes[x.mes])byMes[x.mes]=0;byMes[x.mes]+=x.valor;});
+  const byMes={}, byMesD={};
+  dAll.forEach(x=>{if(!byMes[x.mes])byMes[x.mes]=0;byMes[x.mes]+=x.valor;});
+  d.forEach(x=>{if(!byMesD[x.mes])byMesD[x.mes]=0;byMesD[x.mes]+=x.valor;});
   const maxMes=Math.max(...meses.map(m=>byMes[m]||0))||1;
   document.getElementById('chart-meses').innerHTML=meses.map(m=>{
-    const v=byMes[m]||0; const h=Math.max(4,Math.round(v/maxMes*70));
+    const vAll=byMes[m]||0, vD=byMesD[m]||0;
+    const hAll=Math.max(3,Math.round(vAll/maxMes*70));
+    const hD=hasSel?Math.max(0,Math.round(vD/maxMes*70)):hAll;
     const sel=APP.dashSel.mes===m;
-    const dimmed=APP.dashSel.mes&&!sel;
-    return `<div class="month-col" style="opacity:${dimmed?.4:1};transition:opacity .2s" onclick="window.dashClick('mes','${m}')" title="${m}: ${fmt(v)}">
-      <div class="month-bar-wrap"><div class="month-bar" style="height:${h}px;background:${sel?'#f59e0b':'#3b82f6'};box-shadow:${sel?'0 0 8px rgba(245,158,11,.5)':'none'};transition:all .25s"></div></div>
-      <div class="month-lbl" style="color:${sel?'var(--amber)':'var(--text-dim)'}">${m.split('/')[0]}</div>
-      <div class="month-val">${fmtK(v)}</div>
+    const hasData=hasSel?vD>0:vAll>0;
+    return `<div class="month-col" style="opacity:${hasSel&&!hasData?.3:1};transition:opacity .2s" onclick="window.dashClick('mes','${m}')" title="${m}: ${fmt(hasSel?vD:vAll)}">
+      <div class="month-bar-wrap" style="position:relative">
+        <div style="position:absolute;bottom:0;left:0;right:0;height:${hAll}px;background:var(--border2);border-radius:3px 3px 0 0;transition:height .4s"></div>
+        <div class="month-bar" style="height:${hD}px;background:${sel?'#f59e0b':hasSel&&hasData?'#f59e0b':'#3b82f6'};box-shadow:${sel||hasSel&&hasData?'0 0 6px rgba(245,158,11,.4)':'none'};position:relative;transition:all .35s"></div>
+      </div>
+      <div class="month-lbl" style="color:${sel||(hasSel&&hasData)?'var(--amber)':'var(--text-dim)'}">${m.split('/')[0]}</div>
+      <div class="month-val">${fmtK(hasSel?vD:vAll)}</div>
     </div>`;
   }).join('');
-  // Lojas — CLICÁVEIS
-  const byL={};dAll.forEach(x=>{if(!byL[x.loja])byL[x.loja]=0;byL[x.loja]+=x.valor;});
+  // Lojas — CLICÁVEIS + REATIVAS
+  const byL={}, byLd={};
+  dAll.forEach(x=>{if(!byL[x.loja])byL[x.loja]=0;byL[x.loja]+=x.valor;});
+  d.forEach(x=>{if(!byLd[x.loja])byLd[x.loja]=0;byLd[x.loja]+=x.valor;});
   const sL=Object.entries(byL).sort((a,b)=>b[1]-a[1]).slice(0,8);const maxL=sL[0]?.[1]||1;
   document.getElementById('chart-lojas').innerHTML=sL.map(([l,v])=>{
     const sel=APP.dashSel.loja===l;
-    const dimmed=APP.dashSel.loja&&!sel;
+    const inF=byLd[l]>0;
+    const dimmed=hasSel&&!inF;
+    const vD=byLd[l]||0;
     return `<div class="dash-bar-item ${sel?'dash-bar-sel':''} ${dimmed?'dash-bar-dim':''}" onclick="window.dashClick('loja','${l}')" title="Loja ${l} — clique para filtrar">
-      <div class="bar-header"><span class="bar-label" style="font-weight:${sel?'600':'400'}">Loja ${l}</span><span class="bar-val">${fmt(v)}</span></div>
-      <div class="bar-track"><div class="bar-fill" style="width:${(v/maxL*100).toFixed(1)}%;background:${sel?'var(--amber)':'#10b981'};transition:all .3s"></div></div>
+      <div class="bar-header"><span class="bar-label" style="font-weight:${inF&&hasSel?'600':'400'}">Loja ${l}</span>
+        <span class="bar-val">${hasSel&&inF?fmt(vD):fmt(v)}</span></div>
+      <div class="bar-track" style="position:relative">
+        <div style="position:absolute;inset:0;background:var(--border2);border-radius:3px"></div>
+        <div class="bar-fill" style="width:${hasSel?(vD/maxL*100).toFixed(1):(v/maxL*100).toFixed(1)}%;background:${sel?'var(--amber)':inF&&hasSel?'#f59e0b':'#10b981'};position:relative;transition:width .4s,background .3s"></div>
+      </div>
     </div>`;
   }).join('');
-  // Status — CLICÁVEIS
+  // Status — CLICÁVEIS + REATIVOS
   const bySt={PENDENTE:0,EXTRAÍDO:0,NOTA_EMITIDA:0,RETIRADO:0,DESCARTE:0};
+  const byStD={PENDENTE:0,EXTRAÍDO:0,NOTA_EMITIDA:0,RETIRADO:0,DESCARTE:0};
   dAll.forEach(x=>{if(bySt[x.status]!==undefined)bySt[x.status]++;});
+  d.forEach(x=>{if(byStD[x.status]!==undefined)byStD[x.status]++;});
   const stC={PENDENTE:'#64748b',EXTRAÍDO:'#3b82f6',NOTA_EMITIDA:'#f59e0b',RETIRADO:'#10b981',DESCARTE:'#f97316'};
   const stL={PENDENTE:'Pendente',EXTRAÍDO:'Extraído',NOTA_EMITIDA:'Nota Emitida',RETIRADO:'Retirado',DESCARTE:'Descarte'};
   const maxSt=Math.max(...Object.values(bySt))||1;
   document.getElementById('chart-status').innerHTML=Object.entries(bySt).map(([s,v])=>{
     const sel=APP.dashSel.status===s;
-    const dimmed=APP.dashSel.status&&!sel;
+    const vD=byStD[s]||0;
+    const inF=vD>0;
+    const dimmed=hasSel&&!inF;
     return `<div class="dash-bar-item ${sel?'dash-bar-sel':''} ${dimmed?'dash-bar-dim':''}" onclick="window.dashClick('status','${s}')" title="Clique para filtrar: ${stL[s]}">
-      <div class="bar-header"><span class="bar-label" style="font-weight:${sel?'600':'400'}">${stL[s]}</span><span class="bar-val">${v}</span></div>
-      <div class="bar-track"><div class="bar-fill" style="width:${(v/maxSt*100).toFixed(1)}%;background:${sel?'var(--amber)':stC[s]};transition:all .3s"></div></div>
+      <div class="bar-header"><span class="bar-label" style="font-weight:${inF&&hasSel?'600':'400'}">${stL[s]}</span>
+        <span class="bar-val">${hasSel?vD:v}</span></div>
+      <div class="bar-track" style="position:relative">
+        <div style="position:absolute;inset:0;background:var(--border2);border-radius:3px"></div>
+        <div class="bar-fill" style="width:${hasSel?(vD/maxSt*100).toFixed(1):(v/maxSt*100).toFixed(1)}%;background:${sel?'var(--amber)':inF&&hasSel?'#f59e0b':stC[s]};position:relative;transition:width .4s,background .3s"></div>
+      </div>
     </div>`;
   }).join('');
   renderDashDrillDown(d);
@@ -1914,6 +1932,91 @@ function renderProdPagination(total){
 function goProdP(p){APP.prodPage=p;renderProdTable();document.getElementById('section-produtos')?.scrollTo(0,0);}
 window.goProdP = goProdP;
 
+// ══ IMPORT PRODUTOS XLSX ══
+function handleProdXlsx(evt){
+  const file=evt.target.files[0]; if(!file) return;
+  const mes=document.getElementById('prod-import-mes')?.value||'';
+  const acao=document.getElementById('prod-import-acao')?.value||'adicionar';
+  const log=document.getElementById('prod-import-log');
+  if(!mes){if(log)log.innerHTML='<span class="log-err">❌ Selecione o mês de referência.</span>';return;}
+  if(log) log.innerHTML='<span style="color:var(--text-dim)">Lendo arquivo...</span>';
+  const reader=new FileReader();
+  reader.onload=async e=>{
+    try{
+      const wb=XLSX.read(e.target.result,{type:'array'});
+      const wsName=wb.SheetNames[0];
+      const raw=XLSX.utils.sheet_to_json(wb.Sheets[wsName],{header:1,defval:''});
+      if(raw.length<2){if(log)log.innerHTML='<span class="log-err">❌ Arquivo vazio.</span>';return;}
+      // detect header row
+      let startRow=0;
+      const h0=String(raw[0][0]||'').toUpperCase();
+      if(h0==='SAIDA_ESTOQUE'||isNaN(Number(h0))) startRow=1;
+      // Build romaneio lookup from APP.dados
+      const romMap={};
+      APP.dados.forEach(d=>{romMap[d.romaneio]={loja:d.loja,mes:d.mes,marca:d.marca,motivo:d.motivo,status:d.status,valor:d.valor};});
+      let ok=0,skip=0,noMatch=0;
+      const novos=[];
+      for(let i=startRow;i<raw.length;i++){
+        const row=raw[i];
+        if(!row||row.every(c=>String(c).trim()===''))continue;
+        const rom=String(row[0]||'').trim();
+        const empresa=row[1];
+        const codProd=row[2];
+        const descricao=String(row[3]||'').trim();
+        const qtd=parseInt(row[4])||0;
+        const marcaProd=String(row[6]||row[5]||'').trim();
+        if(!rom||!descricao||!qtd){skip++;continue;}
+        const romData=romMap[rom]||{};
+        novos.push({
+          romaneio:rom,
+          cod_produto:codProd,
+          descricao:descricao.toUpperCase(),
+          quantidade:qtd,
+          marca_produto:marcaProd,
+          loja:romData.loja||String(empresa||''),
+          mes:romData.mes||mes,
+          marca_fornecedor:romData.marca||'',
+          motivo:romData.motivo||'',
+          valor_romaneio:romData.valor||0,
+          status:romData.status||'PENDENTE',
+        });
+        if(!romData.loja) noMatch++;
+        ok++;
+      }
+      // Remove existing if substituir
+      if(acao==='substituir'){
+        APP.produtos=APP.produtos.filter(p=>p.mes!==mes);
+      }
+      APP.produtos=[...APP.produtos,...novos];
+      // Reload firebase if needed (optional — just update local)
+      if(log) log.innerHTML=`<span class="log-ok">✅ ${ok.toLocaleString('pt-BR')} produtos importados → ${mes}</span>`+
+        (skip>0?`
+<span class="log-warn">⚠ ${skip} linhas ignoradas</span>`:'')+
+        (noMatch>0?`
+<span class="log-warn">⚠ ${noMatch} produtos sem romaneio correspondente (mês ${mes} pode não estar nos romaneios)</span>`:'');
+      // Refresh aba produtos
+      initProdFilters();
+      applyProdFilters();
+      document.getElementById('cnt-produtos').textContent=APP.produtos.length.toLocaleString('pt-BR');
+      toast('✅ '+ok.toLocaleString('pt-BR')+' produtos importados → '+mes,'green');
+    }catch(err){
+      if(log) log.innerHTML=`<span class="log-err">❌ Erro: ${err.message}</span>`;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+window.handleProdXlsx=handleProdXlsx;
+
+// Drag drop produtos
+document.addEventListener('DOMContentLoaded',function(){
+  const dz=document.getElementById('prod-drop-zone');
+  if(dz){
+    dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});
+    dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));
+    dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');const f=e.dataTransfer.files[0];if(f)handleProdXlsx({target:{files:[f]}});});
+  }
+});
+
 Object.assign(window,{showTab,filtrarMes,applyFilters,resetFilters,sortBy,setChip,toggleTheme,dashClick,dashClearSel,renderDashDrillDown,
   marcarFiltrados,renderPicker,selMarca,copiarExtracao,handleXlsx,importarPaste,
   renderHistorico,remMes,excluirRegistro,exportarCSV,exportarExcel,exportarTXT,
@@ -2771,6 +2874,42 @@ document.addEventListener('DOMContentLoaded', function(){
           </div>
           <div class="import-log" id="paste-log">Aguardando dados...</div>
         </div>
+        <div class="import-card full" data-role="admin">
+          <h2>📦 Importar Planilha de Produtos</h2>
+          <p>Arraste o arquivo .xlsx de produtos exportado do ERP. Colunas esperadas: <strong>SAIDA_ESTOQUE · EMPRESA · PRODUTO · DESCRICAO · QUANTIDADE · MARCA · DESCRICAO</strong><br>
+          Os produtos serão vinculados automaticamente aos romaneios já cadastrados pelo número da saída de estoque.</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+            <div class="fg">
+              <div class="flbl">Mês de Referência</div>
+              <select id="prod-import-mes" style="width:100%">
+                <option value="AGO/2025">AGO/2025</option><option value="SET/2025">SET/2025</option>
+                <option value="OUT/2025">OUT/2025</option><option value="NOV/2025">NOV/2025</option>
+                <option value="DEZ/2025">DEZ/2025</option><option value="JAN/2026">JAN/2026</option>
+                <option value="FEV/2026">FEV/2026</option><option value="MAR/2026">MAR/2026</option>
+                <option value="ABR/2026" selected>ABR/2026</option><option value="MAI/2026">MAI/2026</option>
+                <option value="JUN/2026">JUN/2026</option><option value="JUL/2026">JUL/2026</option>
+                <option value="AGO/2026">AGO/2026</option><option value="SET/2026">SET/2026</option>
+                <option value="OUT/2026">OUT/2026</option><option value="NOV/2026">NOV/2026</option>
+                <option value="DEZ/2026">DEZ/2026</option><option value="JAN/2027">JAN/2027</option>
+              </select>
+            </div>
+            <div class="fg">
+              <div class="flbl">Ação</div>
+              <select id="prod-import-acao" style="width:100%">
+                <option value="adicionar">Adicionar ao existente</option>
+                <option value="substituir">Substituir registros do mês</option>
+              </select>
+            </div>
+          </div>
+          <div class="drop-zone" id="prod-drop-zone">
+            <input type="file" accept=".xlsx,.xls" onchange="window.handleProdXlsx&&window.handleProdXlsx(event)">
+            <div class="drop-icon">📦</div>
+            <div class="drop-title">Arraste o .xlsx de produtos aqui ou clique para selecionar</div>
+            <div class="drop-sub">SAIDA_ESTOQUE · EMPRESA · PRODUTO · DESCRICAO · QUANTIDADE · MARCA</div>
+          </div>
+          <div class="import-log" id="prod-import-log">Aguardando arquivo de produtos...</div>
+        </div>
+
         <div class="import-card full">
           <h2>📅 Histórico de Períodos</h2>
           <table class="hist-table"><thead><tr>
