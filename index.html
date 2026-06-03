@@ -188,6 +188,7 @@ async function carregarDados() {
     APP.filtrados = [...dadosAtivos()];
     populateMesSelects();
     initFilters();
+    initDashFilters();
     renderDashboard();
     renderStatusStrip();
     renderTable();
@@ -360,9 +361,136 @@ function populateMesSelects() {
 }
 
 // ══ DASHBOARD ══
+// ══ DASHBOARD FILTERS ══
+function dadosDashboard(){
+  const de=document.getElementById('d-periodo-de')?.value||'';
+  const ate=document.getElementById('d-periodo-ate')?.value||'';
+  const loja=document.getElementById('d-loja')?.value||'';
+  const marca=document.getElementById('d-marca')?.value||'';
+  const motivo=document.getElementById('d-motivo')?.value||'';
+  const status=document.getElementById('d-status')?.value||'';
+  const comp=document.getElementById('d-comp')?.value||'';
+  return APP.dados.filter(d=>{
+    if(de||ate){ if(!mesInRange(d.mes,de,ate)) return false; }
+    if(loja&&d.loja!==loja) return false;
+    if(marca&&d.marca?.trim()!==marca) return false;
+    if(motivo&&d.motivo!==motivo) return false;
+    if(status&&d.status!==status) return false;
+    if(comp&&d.comprador!==comp) return false;
+    return true;
+  });
+}
+
+function applyDashFilters(){
+  updateDashPeriodLabel();
+  renderDashboard();
+}
+window.applyDashFilters=applyDashFilters;
+
+function updateDashPeriodLabel(){
+  const de=document.getElementById('d-periodo-de')?.value||'';
+  const ate=document.getElementById('d-periodo-ate')?.value||'';
+  const lbl=document.getElementById('d-period-label');
+  if(!lbl) return;
+  if(!de&&!ate){ lbl.textContent='Período'; lbl.style.color='var(--text-dim)'; return; }
+  if(de&&ate&&de===ate) lbl.textContent=de;
+  else if(de&&ate) lbl.textContent=de+' → '+ate;
+  else if(de) lbl.textContent='A partir de '+de;
+  else lbl.textContent='Até '+ate;
+  lbl.style.color='var(--amber)';
+}
+window.updateDashPeriodLabel=updateDashPeriodLabel;
+
+function toggleDashPeriodDd(){
+  const panel=document.getElementById('d-period-panel');
+  if(!panel) return;
+  const isOpen=panel.style.display!=='none';
+  panel.style.display=isOpen?'none':'block';
+  if(!isOpen) populateDashPeriodSelects();
+}
+window.toggleDashPeriodDd=toggleDashPeriodDd;
+
+function populateDashPeriodSelects(){
+  const meses=getMeses();
+  ['d-periodo-de','d-periodo-ate'].forEach(id=>{
+    const el=document.getElementById(id); if(!el) return;
+    const cur=el.value;
+    while(el.options.length>1) el.remove(1);
+    meses.forEach(m=>{const o=new Option(m,m);if(m===cur)o.selected=true;el.add(o);});
+  });
+  const grid=document.getElementById('d-presets-grid');
+  if(!grid) return;
+  const presets=[];
+  if(meses.length>=1) presets.push({label:'Último mês',de:meses[meses.length-1],ate:meses[meses.length-1]});
+  if(meses.length>=3) presets.push({label:'Últ. 3 meses',de:meses[meses.length-3],ate:meses[meses.length-1]});
+  if(meses.length>=6) presets.push({label:'Últ. 6 meses',de:meses[meses.length-6],ate:meses[meses.length-1]});
+  presets.push({label:'Tudo',de:'',ate:''});
+  const anos=[...new Set(meses.map(m=>m.split('/')[1]))].sort();
+  anos.forEach(ano=>{
+    const doAno=meses.filter(m=>m.endsWith('/'+ano));
+    if(doAno.length>0) presets.push({label:'Ano '+ano,de:doAno[0],ate:doAno[doAno.length-1]});
+  });
+  grid.innerHTML=presets.map(p=>`<button class="period-preset-btn" onclick="window.applyDashPreset('${p.de}','${p.ate}')">${p.label}</button>`).join('');
+}
+
+function applyDashPreset(de,ate){
+  const elDe=document.getElementById('d-periodo-de');
+  const elAte=document.getElementById('d-periodo-ate');
+  if(elDe) elDe.value=de; if(elAte) elAte.value=ate;
+  updateDashPeriodLabel(); renderDashboard();
+}
+window.applyDashPreset=applyDashPreset;
+
+function resetDashFilters(){
+  ['d-periodo-de','d-periodo-ate','d-loja','d-marca','d-motivo','d-status','d-comp'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.value='';
+  });
+  updateDashPeriodLabel(); renderDashboard();
+}
+window.resetDashFilters=resetDashFilters;
+
+function initDashFilters(){
+  // Populate loja
+  const lojas=[...new Set(APP.dados.map(d=>d.loja))].sort((a,b)=>+a-+b);
+  const sl=document.getElementById('d-loja');
+  if(sl){ while(sl.options.length>1)sl.remove(1); lojas.forEach(l=>sl.add(new Option('Loja '+l,l))); }
+  // Populate marca
+  const marcas=[...new Set(APP.dados.map(d=>d.marca?.trim()||''))].filter(Boolean).sort();
+  const sm=document.getElementById('d-marca');
+  if(sm){ while(sm.options.length>1)sm.remove(1); marcas.forEach(m=>sm.add(new Option(m,m))); }
+  // Populate comprador
+  const comps=[...new Set(APP.dados.map(d=>d.comprador).filter(Boolean))].sort();
+  const sc=document.getElementById('d-comp');
+  if(sc){ while(sc.options.length>1)sc.remove(1); comps.forEach(c=>sc.add(new Option(c,c))); }
+  // Populate period selects
+  populateDashPeriodSelects();
+}
+window.initDashFilters=initDashFilters;
+
+// Close dash period panel on outside click
+document.addEventListener('click',function(e){
+  const btn=document.getElementById('d-period-btn');
+  const panel=document.getElementById('d-period-panel');
+  if(btn&&panel&&!btn.contains(e.target)&&!panel.contains(e.target)){
+    panel.style.display='none';
+  }
+});
+
 function renderDashboard() {
-  const d = dadosAtivos();
-  if(!d.length) { document.getElementById('kpi-grid').innerHTML='<div style="color:var(--text-dim);padding:20px">Nenhum dado carregado.</div>'; return; }
+  const d = dadosDashboard();
+  // Update filter tag
+  const _de=document.getElementById('d-periodo-de')?.value||'';
+  const _ate=document.getElementById('d-periodo-ate')?.value||'';
+  const _loja=document.getElementById('d-loja')?.value||'';
+  const _marca=document.getElementById('d-marca')?.value||'';
+  const _status=document.getElementById('d-status')?.value||'';
+  const activeFilters=[
+    (_de&&_ate&&_de===_ate)?_de:(_de||_ate)?(_de&&_ate?_de+'→'+_ate:_de||_ate):'',
+    _loja?'Loja '+_loja:'', _marca, _status
+  ].filter(Boolean);
+  const tagEl=document.getElementById('dash-filter-tag');
+  if(tagEl) tagEl.innerHTML=activeFilters.length?activeFilters.map(f=>`<span class="dash-tag">${f}</span>`).join(''):'';
+  if(!d.length) { document.getElementById('kpi-grid').innerHTML='<div style="color:var(--text-dim);padding:20px">Nenhum resultado para os filtros selecionados.</div>'; return; }
   const total    = d.reduce((a,b)=>a+b.valor,0);
   const lojas    = [...new Set(d.map(x=>x.loja))].length;
   const marcas   = [...new Set(d.map(x=>x.marca?.trim()))].length;
@@ -372,8 +500,9 @@ function renderDashboard() {
   const descarte = d.filter(x=>x.status==='DESCARTE').length;
   const valDesc  = d.filter(x=>x.status==='DESCARTE').reduce((a,b)=>a+b.valor,0);
 
+  const periodoLabel=activeFilters.length?activeFilters.join(' · '):'Todos os períodos';
   document.getElementById('kpi-grid').innerHTML = `
-    <div class="kpi c-amber"><div class="kpi-label">Valor Total</div><div class="kpi-val">${fmt(total)}</div><div class="kpi-sub">${APP.mesGlobal||'Todos os períodos'}</div></div>
+    <div class="kpi c-amber"><div class="kpi-label">Valor Total</div><div class="kpi-val">${fmt(total)}</div><div class="kpi-sub">${periodoLabel}</div></div>
     <div class="kpi c-blue"><div class="kpi-label">Romaneios</div><div class="kpi-val">${d.length.toLocaleString('pt-BR')}</div><div class="kpi-sub">registros</div></div>
     <div class="kpi c-purple"><div class="kpi-label">Marcas</div><div class="kpi-val">${marcas}</div><div class="kpi-sub">fornecedores</div></div>
     <div class="kpi c-green"><div class="kpi-label">Lojas</div><div class="kpi-val">${lojas}</div><div class="kpi-sub">envolvidas</div></div>
@@ -409,10 +538,25 @@ function renderDashboard() {
   document.getElementById('legend-motivo').innerHTML=Object.entries(motivos).map(([k,v])=>`
     <div class="legend-item"><div class="legend-dot" style="background:${mC[k]}"></div>${mN[k]}<span class="legend-pct">${(v/mT*100).toFixed(1)}%</span></div>
   `).join('');
-  // Evolução mensal
+  // Evolução mensal — mostra todos os meses (contexto geral)
   const meses=getMeses();
   const byMes={};
-  APP.dados.forEach(x=>{if(!byMes[x.mes])byMes[x.mes]=0;byMes[x.mes]+=x.valor;});
+  // Para evolução usa APP.dados filtrado apenas por loja/marca/status (sem período)
+  // para que o usuário veja o histórico completo como contexto
+  const dEvo=APP.dados.filter(x=>{
+    const loja=document.getElementById('d-loja')?.value||'';
+    const marca=document.getElementById('d-marca')?.value||'';
+    const motivo=document.getElementById('d-motivo')?.value||'';
+    const status=document.getElementById('d-status')?.value||'';
+    const comp=document.getElementById('d-comp')?.value||'';
+    if(loja&&x.loja!==loja) return false;
+    if(marca&&x.marca?.trim()!==marca) return false;
+    if(motivo&&x.motivo!==motivo) return false;
+    if(status&&x.status!==status) return false;
+    if(comp&&x.comprador!==comp) return false;
+    return true;
+  });
+  dEvo.forEach(x=>{if(!byMes[x.mes])byMes[x.mes]=0;byMes[x.mes]+=x.valor;});
   const maxMes=Math.max(...meses.map(m=>byMes[m]||0))||1;
   document.getElementById('chart-meses').innerHTML=meses.map(m=>{
     const v=byMes[m]||0;const h=Math.max(4,Math.round(v/maxMes*70));
@@ -1694,6 +1838,9 @@ td{padding:9px 13px;color:var(--text-mid);vertical-align:middle;white-space:nowr
 .resumo-status-nome{color:var(--text-mid);flex:1}
 .resumo-status-cnt{font-family:var(--mono);font-weight:600;color:var(--text);min-width:28px;text-align:right}
 .resumo-status-val{font-family:var(--mono);font-size:10px;color:var(--text-dim);min-width:90px;text-align:right}
+.dash-filters-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:18px;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+.dash-filter-tag{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.dash-tag{display:inline-flex;align-items:center;background:var(--amber-bg);border:1px solid var(--amber-border);color:var(--amber);font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px;white-space:nowrap}
 @media print{
 @media print{.topbar,.nav-tabs,.filters-bar,.pagination,.ext-actions,.marca-picker,.btn,#toast,#loading-overlay,.seed-banner{display:none!important}.extracao-wrap{grid-template-columns:1fr}.extracao-result{border:none}body{background:white;color:black}}
 </style>
@@ -1784,6 +1931,88 @@ document.addEventListener('DOMContentLoaded', function(){
 
     <!-- DASHBOARD -->
     <div class="section active" id="section-dashboard">
+
+      <!-- FILTROS DO DASHBOARD -->
+      <div class="dash-filters-bar">
+        <!-- Período -->
+        <div class="fg" style="position:relative">
+          <div class="flbl">Período</div>
+          <div id="d-period-btn" class="period-btn" onclick="window.toggleDashPeriodDd&&window.toggleDashPeriodDd()">
+            <span style="font-size:14px">📅</span>
+            <span id="d-period-label" style="flex:1">Período</span>
+            <span style="font-size:10px;opacity:.5">▾</span>
+          </div>
+          <div id="d-period-panel" class="period-panel" style="display:none">
+            <div class="period-panel-inner">
+              <div class="period-row">
+                <div class="period-col">
+                  <div class="period-col-label">De</div>
+                  <select id="d-periodo-de" class="period-select" onchange="window.updateDashPeriodLabel&&window.updateDashPeriodLabel();window.applyDashFilters&&window.applyDashFilters()"><option value="">Início</option></select>
+                </div>
+                <div class="period-arrow">→</div>
+                <div class="period-col">
+                  <div class="period-col-label">Até</div>
+                  <select id="d-periodo-ate" class="period-select" onchange="window.updateDashPeriodLabel&&window.updateDashPeriodLabel();window.applyDashFilters&&window.applyDashFilters()"><option value="">Fim</option></select>
+                </div>
+              </div>
+              <div class="period-presets">
+                <div class="period-preset-label">Atalhos</div>
+                <div class="period-presets-grid" id="d-presets-grid"></div>
+              </div>
+              <div class="period-actions">
+                <button class="btn btn-sm btn-outline" onclick="document.getElementById('d-periodo-de').value='';document.getElementById('d-periodo-ate').value='';window.updateDashPeriodLabel();window.applyDashFilters()">✕ Limpar</button>
+                <button class="btn btn-sm btn-amber" onclick="window.toggleDashPeriodDd&&window.toggleDashPeriodDd()">Aplicar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Loja -->
+        <div class="fg">
+          <div class="flbl">Loja</div>
+          <select id="d-loja" onchange="window.applyDashFilters&&window.applyDashFilters()"><option value="">Todas</option></select>
+        </div>
+        <!-- Marca -->
+        <div class="fg">
+          <div class="flbl">Marca</div>
+          <select id="d-marca" onchange="window.applyDashFilters&&window.applyDashFilters()" style="min-width:160px"><option value="">Todas</option></select>
+        </div>
+        <!-- Motivo -->
+        <div class="fg">
+          <div class="flbl">Motivo</div>
+          <select id="d-motivo" onchange="window.applyDashFilters&&window.applyDashFilters()">
+            <option value="">Todos</option>
+            <option value="VALIDADE">Validade</option>
+            <option value="DANIFICADO">Danificado</option>
+            <option value="ALTERADO">Alterado</option>
+          </select>
+        </div>
+        <!-- Status -->
+        <div class="fg">
+          <div class="flbl">Status</div>
+          <select id="d-status" onchange="window.applyDashFilters&&window.applyDashFilters()">
+            <option value="">Todos</option>
+            <option value="PENDENTE">Pendente</option>
+            <option value="EXTRAÍDO">Extraído</option>
+            <option value="NOTA_EMITIDA">Nota Emitida</option>
+            <option value="RETIRADO">Retirado</option>
+            <option value="DESCARTE">Descarte</option>
+          </select>
+        </div>
+        <!-- Comprador -->
+        <div class="fg">
+          <div class="flbl">Comprador</div>
+          <select id="d-comp" onchange="window.applyDashFilters&&window.applyDashFilters()"><option value="">Todos</option></select>
+        </div>
+        <!-- Limpar -->
+        <div class="fg">
+          <button class="btn btn-outline" onclick="window.resetDashFilters&&window.resetDashFilters()">✕ Limpar</button>
+        </div>
+        <!-- Tag resultado -->
+        <div class="fg" style="margin-left:auto">
+          <div id="dash-filter-tag" class="dash-filter-tag"></div>
+        </div>
+      </div>
+
       <div class="kpi-grid" id="kpi-grid"></div>
       <div class="charts-row">
         <div class="chart-card" style="grid-column:span 2">
