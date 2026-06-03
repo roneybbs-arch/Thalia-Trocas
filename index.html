@@ -192,6 +192,8 @@ async function carregarDados() {
     renderDashboard();
     renderStatusStrip();
     renderTable();
+    // Carrega produtos em segundo plano silenciosamente
+    loadProdutosSilent();
   } catch(e) {
     setLoading(false);
     toast('❌ Erro ao carregar dados: ' + e.message, 'red');
@@ -1669,11 +1671,35 @@ async function loadProdutos(){
   }
 }
 
+// Carrega produtos silenciosamente em segundo plano (sem spinner, sem toast)
+async function loadProdutosSilent(){
+  if(APP.produtos.length > 0) return;
+  try{
+    const resp = await fetch('produtos.json');
+    if(!resp.ok) return; // falha silenciosa
+    APP.produtos = await resp.json();
+    // Atualiza contador da aba
+    const cnt = document.getElementById('cnt-produtos');
+    if(cnt) cnt.textContent = APP.produtos.length.toLocaleString('pt-BR');
+    // Se o dashboard estiver aberto e tiver seleção, re-renderiza o drilldown
+    const dashSection = document.getElementById('section-dashboard');
+    if(dashSection?.classList.contains('active')){
+      renderDashDrillDown(dadosDashFinal());
+    }
+    // Inicializa filtros da aba produtos para quando o usuário abrir
+    initProdFilters();
+  }catch(e){
+    // silencioso — produtos.json pode não existir ainda
+  }
+}
+window.loadProdutosSilent = loadProdutosSilent;
+
 function renderProdutos(){
   if(APP.produtos.length === 0){
     loadProdutos();
     return;
   }
+  initProdFilters();
   applyProdFilters();
 }
 window.renderProdutos = renderProdutos;
