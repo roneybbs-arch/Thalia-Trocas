@@ -341,6 +341,7 @@ function showTab(tab) {
   if(tab==='extracao')  renderPicker();
   if(tab==='dashboard') renderDashboard();
   if(tab==='importar')  renderHistorico();
+  if(tab==='produtos')  renderProdutos();
 }
 
 // ══ MÊS GLOBAL ══
@@ -476,20 +477,58 @@ document.addEventListener('click',function(e){
   }
 });
 
+// ══ DASH SELECTION STATE ══
+APP.dashSel = { marca:null, loja:null, mes:null, motivo:null, status:null };
+
+function dashClick(tipo, valor){
+  // Toggle: if already selected, deselect
+  if(APP.dashSel[tipo]===valor) APP.dashSel[tipo]=null;
+  else APP.dashSel[tipo]=valor;
+  renderDashboard();
+}
+window.dashClick=dashClick;
+
+function dashClearSel(){
+  APP.dashSel={marca:null,loja:null,mes:null,motivo:null,status:null};
+  renderDashboard();
+}
+window.dashClearSel=dashClearSel;
+
+function dadosDashFinal(){
+  // Base do dadosDashboard (filtros do topo), depois aplica seleções clicadas
+  const base=dadosDashboard();
+  const s=APP.dashSel;
+  return base.filter(d=>{
+    if(s.marca && d.marca?.trim()!==s.marca) return false;
+    if(s.loja  && d.loja!==s.loja)           return false;
+    if(s.mes   && d.mes!==s.mes)             return false;
+    if(s.motivo&& d.motivo!==s.motivo)       return false;
+    if(s.status&& d.status!==s.status)       return false;
+    return true;
+  });
+}
+
 function renderDashboard() {
-  const d = dadosDashboard();
+  const d = dadosDashFinal();
+  const dAll = dadosDashboard(); // sem seleções, para contexto
   // Update filter tag
   const _de=document.getElementById('d-periodo-de')?.value||'';
   const _ate=document.getElementById('d-periodo-ate')?.value||'';
   const _loja=document.getElementById('d-loja')?.value||'';
   const _marca=document.getElementById('d-marca')?.value||'';
   const _status=document.getElementById('d-status')?.value||'';
+  const s=APP.dashSel;
+  const activeSel=Object.entries(s).filter(([,v])=>v).map(([k,v])=>`${v}`);
   const activeFilters=[
     (_de&&_ate&&_de===_ate)?_de:(_de||_ate)?(_de&&_ate?_de+'→'+_ate:_de||_ate):'',
     _loja?'Loja '+_loja:'', _marca, _status
   ].filter(Boolean);
   const tagEl=document.getElementById('dash-filter-tag');
-  if(tagEl) tagEl.innerHTML=activeFilters.length?activeFilters.map(f=>`<span class="dash-tag">${f}</span>`).join(''):'';
+  const allTags=[...activeFilters,...activeSel];
+  if(tagEl) tagEl.innerHTML=allTags.length?
+    allTags.map(f=>`<span class="dash-tag">${f}</span>`).join('')+
+    (activeSel.length?` <button class="btn btn-sm btn-outline" style="padding:2px 8px;font-size:10px" onclick="window.dashClearSel()">✕ limpar seleção</button>`:'')
+    :'';
   if(!d.length) { document.getElementById('kpi-grid').innerHTML='<div style="color:var(--text-dim);padding:20px">Nenhum resultado para os filtros selecionados.</div>'; return; }
   const total    = d.reduce((a,b)=>a+b.valor,0);
   const lojas    = [...new Set(d.map(x=>x.loja))].length;
@@ -511,33 +550,46 @@ function renderDashboard() {
     <div class="kpi c-red"><div class="kpi-label">Pendentes</div><div class="kpi-val">${pendente}</div><div class="kpi-sub">aguardando</div></div>
     <div class="kpi c-orange"><div class="kpi-label">Descarte</div><div class="kpi-val">${descarte}</div><div class="kpi-sub">${fmt(valDesc)}</div></div>
   `;
-  // Top marcas
+  // Top marcas — CLICÁVEIS
   const byM={};
-  d.forEach(x=>{const k=x.marca?.trim()||'';if(!byM[k])byM[k]={v:0,n:0};byM[k].v+=x.valor;byM[k].n++;});
-  const sM=Object.entries(byM).sort((a,b)=>b[1].v-a[1].v).slice(0,10);
+  dAll.forEach(x=>{const k=x.marca?.trim()||'';if(!byM[k])byM[k]={v:0,n:0};byM[k].v+=x.valor;byM[k].n++;});
+  const sM=Object.entries(byM).sort((a,b)=>b[1].v-a[1].v).slice(0,12);
   const maxM=sM[0]?.[1]?.v||1;
-  document.getElementById('chart-marcas').innerHTML=sM.map(([m,v],i)=>`
-    <div><div class="bar-header"><span class="bar-label">${i+1}. ${m}</span><span class="bar-val">${fmt(v.v)} · ${v.n}</span></div>
-    <div class="bar-track"><div class="bar-fill" style="width:${(v.v/maxM*100).toFixed(1)}%;background:${i<3?'#f59e0b':'#3b82f6'}"></div></div></div>
-  `).join('');
-  // Pie motivos
+  document.getElementById('chart-marcas').innerHTML=sM.map(([m,v],i)=>{
+    const sel=APP.dashSel.marca===m;
+    const dimmed=APP.dashSel.marca&&!sel;
+    return `<div class="dash-bar-item ${sel?'dash-bar-sel':''} ${dimmed?'dash-bar-dim':''}"
+      onclick="window.dashClick('marca','${m.replace(/'/g,"\'")}')" title="Clique para filtrar por ${m}">
+      <div class="bar-header">
+        <span class="bar-label" style="font-weight:${sel?'600':'400'}">${i+1}. ${m}</span>
+        <span class="bar-val">${fmt(v.v)} · ${v.n} rom.</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(v.v/maxM*100).toFixed(1)}%;background:${sel?'var(--amber)':i<3?'#e8a020':'#3b82f6'};transition:all .3s"></div></div>
+    </div>`;
+  }).join('');
+  // Pie motivos — CLICÁVEL
   const motivos={VALIDADE:0,DANIFICADO:0,ALTERADO:0};
-  d.forEach(x=>{if(motivos[x.motivo]!==undefined)motivos[x.motivo]+=x.valor;});
+  dAll.forEach(x=>{if(motivos[x.motivo]!==undefined)motivos[x.motivo]+=x.valor;});
   const mT=Object.values(motivos).reduce((a,b)=>a+b,0)||1;
   const mC={VALIDADE:'#3b82f6',DANIFICADO:'#ef4444',ALTERADO:'#8b5cf6'};
   const mN={VALIDADE:'Validade',DANIFICADO:'Danificado',ALTERADO:'Alterado'};
   let sa=-Math.PI/2,ps='';
   Object.entries(motivos).forEach(([k,v])=>{
     const a=(v/mT)*2*Math.PI;
-    const x1=50+40*Math.cos(sa),y1=50+40*Math.sin(sa);
-    const x2=50+40*Math.cos(sa+a),y2=50+40*Math.sin(sa+a);
-    ps+=`<path d="M50,50 L${x1.toFixed(1)},${y1.toFixed(1)} A40,40 0 ${a>Math.PI?1:0},1 ${x2.toFixed(1)},${y2.toFixed(1)} Z" fill="${mC[k]}" opacity=".9"/>`;
+    const r=APP.dashSel.motivo===k?44:40;
+    const x1=50+r*Math.cos(sa),y1=50+r*Math.sin(sa);
+    const x2=50+r*Math.cos(sa+a),y2=50+r*Math.sin(sa+a);
+    const op=APP.dashSel.motivo&&APP.dashSel.motivo!==k?'.35':'.92';
+    ps+=`<path d="M50,50 L${x1.toFixed(1)},${y1.toFixed(1)} A${r},${r} 0 ${a>Math.PI?1:0},1 ${x2.toFixed(1)},${y2.toFixed(1)} Z" fill="${mC[k]}" opacity="${op}" style="cursor:pointer;transition:all .2s" onclick="window.dashClick('motivo','${k}')"/>`;
     sa+=a;
   });
-  document.getElementById('pie-motivo').innerHTML=ps+'<circle cx="50" cy="50" r="16" fill="#111318"/>';
-  document.getElementById('legend-motivo').innerHTML=Object.entries(motivos).map(([k,v])=>`
-    <div class="legend-item"><div class="legend-dot" style="background:${mC[k]}"></div>${mN[k]}<span class="legend-pct">${(v/mT*100).toFixed(1)}%</span></div>
-  `).join('');
+  document.getElementById('pie-motivo').innerHTML=ps+'<circle cx="50" cy="50" r="14" fill="var(--surface)" style="pointer-events:none"/>';
+  document.getElementById('legend-motivo').innerHTML=Object.entries(motivos).map(([k,v])=>{
+    const sel=APP.dashSel.motivo===k;
+    return `<div class="legend-item ${sel?'dash-legend-sel':''}" style="cursor:pointer;border-radius:4px;padding:2px 4px;transition:background .15s" onclick="window.dashClick('motivo','${k}')">
+      <div class="legend-dot" style="background:${mC[k]};transform:${sel?'scale(1.3)':'scale(1)'};transition:transform .2s"></div>${mN[k]}<span class="legend-pct">${(v/mT*100).toFixed(1)}%</span>
+    </div>`;
+  }).join('');
   // Evolução mensal — mostra todos os meses (contexto geral)
   const meses=getMeses();
   const byMes={};
@@ -559,30 +611,104 @@ function renderDashboard() {
   dEvo.forEach(x=>{if(!byMes[x.mes])byMes[x.mes]=0;byMes[x.mes]+=x.valor;});
   const maxMes=Math.max(...meses.map(m=>byMes[m]||0))||1;
   document.getElementById('chart-meses').innerHTML=meses.map(m=>{
-    const v=byMes[m]||0;const h=Math.max(4,Math.round(v/maxMes*70));
-    const isActive=APP.mesGlobal===m;
-    return `<div class="month-col" onclick="document.getElementById('mes-global').value='${m}';filtrarMes()">
-      <div class="month-bar-wrap"><div class="month-bar" style="height:${h}px;background:${isActive?'#f59e0b':'#3b82f6'};opacity:${isActive?1:.7}"></div></div>
-      <div class="month-lbl">${m.split('/')[0]}</div><div class="month-val">${fmtK(v)}</div>
+    const v=byMes[m]||0; const h=Math.max(4,Math.round(v/maxMes*70));
+    const sel=APP.dashSel.mes===m;
+    const dimmed=APP.dashSel.mes&&!sel;
+    return `<div class="month-col" style="opacity:${dimmed?.4:1};transition:opacity .2s" onclick="window.dashClick('mes','${m}')" title="${m}: ${fmt(v)}">
+      <div class="month-bar-wrap"><div class="month-bar" style="height:${h}px;background:${sel?'#f59e0b':'#3b82f6'};box-shadow:${sel?'0 0 8px rgba(245,158,11,.5)':'none'};transition:all .25s"></div></div>
+      <div class="month-lbl" style="color:${sel?'var(--amber)':'var(--text-dim)'}">${m.split('/')[0]}</div>
+      <div class="month-val">${fmtK(v)}</div>
     </div>`;
   }).join('');
-  // Lojas
-  const byL={};d.forEach(x=>{if(!byL[x.loja])byL[x.loja]=0;byL[x.loja]+=x.valor;});
+  // Lojas — CLICÁVEIS
+  const byL={};dAll.forEach(x=>{if(!byL[x.loja])byL[x.loja]=0;byL[x.loja]+=x.valor;});
   const sL=Object.entries(byL).sort((a,b)=>b[1]-a[1]).slice(0,8);const maxL=sL[0]?.[1]||1;
-  document.getElementById('chart-lojas').innerHTML=sL.map(([l,v])=>`
-    <div><div class="bar-header"><span class="bar-label">Loja ${l}</span><span class="bar-val">${fmt(v)}</span></div>
-    <div class="bar-track"><div class="bar-fill" style="width:${(v/maxL*100).toFixed(1)}%;background:#10b981"></div></div></div>
-  `).join('');
-  // Status
+  document.getElementById('chart-lojas').innerHTML=sL.map(([l,v])=>{
+    const sel=APP.dashSel.loja===l;
+    const dimmed=APP.dashSel.loja&&!sel;
+    return `<div class="dash-bar-item ${sel?'dash-bar-sel':''} ${dimmed?'dash-bar-dim':''}" onclick="window.dashClick('loja','${l}')" title="Loja ${l} — clique para filtrar">
+      <div class="bar-header"><span class="bar-label" style="font-weight:${sel?'600':'400'}">Loja ${l}</span><span class="bar-val">${fmt(v)}</span></div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(v/maxL*100).toFixed(1)}%;background:${sel?'var(--amber)':'#10b981'};transition:all .3s"></div></div>
+    </div>`;
+  }).join('');
+  // Status — CLICÁVEIS
   const bySt={PENDENTE:0,EXTRAÍDO:0,NOTA_EMITIDA:0,RETIRADO:0,DESCARTE:0};
-  d.forEach(x=>{if(bySt[x.status]!==undefined)bySt[x.status]++;});
+  dAll.forEach(x=>{if(bySt[x.status]!==undefined)bySt[x.status]++;});
   const stC={PENDENTE:'#64748b',EXTRAÍDO:'#3b82f6',NOTA_EMITIDA:'#f59e0b',RETIRADO:'#10b981',DESCARTE:'#f97316'};
   const stL={PENDENTE:'Pendente',EXTRAÍDO:'Extraído',NOTA_EMITIDA:'Nota Emitida',RETIRADO:'Retirado',DESCARTE:'Descarte'};
   const maxSt=Math.max(...Object.values(bySt))||1;
-  document.getElementById('chart-status').innerHTML=Object.entries(bySt).map(([s,v])=>`
-    <div><div class="bar-header"><span class="bar-label">${stL[s]}</span><span class="bar-val">${v}</span></div>
-    <div class="bar-track"><div class="bar-fill" style="width:${(v/maxSt*100).toFixed(1)}%;background:${stC[s]}"></div></div></div>
-  `).join('');
+  document.getElementById('chart-status').innerHTML=Object.entries(bySt).map(([s,v])=>{
+    const sel=APP.dashSel.status===s;
+    const dimmed=APP.dashSel.status&&!sel;
+    return `<div class="dash-bar-item ${sel?'dash-bar-sel':''} ${dimmed?'dash-bar-dim':''}" onclick="window.dashClick('status','${s}')" title="Clique para filtrar: ${stL[s]}">
+      <div class="bar-header"><span class="bar-label" style="font-weight:${sel?'600':'400'}">${stL[s]}</span><span class="bar-val">${v}</span></div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(v/maxSt*100).toFixed(1)}%;background:${sel?'var(--amber)':stC[s]};transition:all .3s"></div></div>
+    </div>`;
+  }).join('');
+  renderDashDrillDown(d);
+}
+
+// ── DRILL-DOWN de produtos no dashboard ──────────────────────────────
+function renderDashDrillDown(d) {
+  const el=document.getElementById('dash-drilldown');
+  if(!el) return;
+  const hasSel=Object.values(APP.dashSel).some(v=>v);
+  if(!hasSel){ el.style.display='none'; return; }
+  el.style.display='block';
+
+  const selLabel=Object.entries(APP.dashSel).filter(([,v])=>v).map(([k,v])=>{
+    const lbl={marca:'Marca',loja:'Loja',mes:'Mês',motivo:'Motivo',status:'Status'};
+    return `${lbl[k]}: <strong>${v}</strong>`;
+  }).join(' · ');
+
+  // Get matching products from APP.produtos
+  const prods = APP.produtos.filter(p=>{
+    const s=APP.dashSel;
+    if(s.marca && p.marca_fornecedor!==s.marca) return false;
+    if(s.loja  && p.loja!==s.loja)              return false;
+    if(s.mes   && p.mes!==s.mes)                return false;
+    if(s.motivo&& p.motivo!==s.motivo)          return false;
+    if(s.status&& p.status!==s.status)          return false;
+    return true;
+  });
+
+  // Aggregate by product
+  const byProd={};
+  prods.forEach(p=>{
+    const k=p.cod_produto+'|'+p.descricao;
+    if(!byProd[k]) byProd[k]={desc:p.descricao,qtd:0,roms:new Set(),marca:p.marca_produto||p.marca_fornecedor};
+    byProd[k].qtd+=p.quantidade;
+    byProd[k].roms.add(p.romaneio);
+  });
+  const topProds=Object.values(byProd).sort((a,b)=>b.qtd-a.qtd).slice(0,20);
+  const totalQtd=prods.reduce((a,b)=>a+b.quantidade,0);
+  const maxQ=topProds[0]?.qtd||1;
+
+  el.innerHTML=`
+    <div class="drilldown-header">
+      <div>
+        <div class="drilldown-title">🔬 Drill-down: produtos</div>
+        <div class="drilldown-sub">${selLabel} &nbsp;·&nbsp; <strong>${prods.length.toLocaleString('pt-BR')}</strong> linhas &nbsp;·&nbsp; <strong>${totalQtd.toLocaleString('pt-BR')}</strong> unidades &nbsp;·&nbsp; <strong>${[...new Set(prods.map(p=>p.cod_produto))].length}</strong> SKUs distintos</div>
+      </div>
+      <button class="btn btn-sm btn-outline" onclick="window.dashClearSel()">✕ Limpar seleção</button>
+    </div>
+    <div class="drilldown-body">
+      ${topProds.length===0?'<div style="padding:20px;color:var(--text-dim);text-align:center">Nenhum produto encontrado — os dados de produtos precisam estar carregados na aba Produtos.</div>':
+        topProds.map((p,i)=>`
+        <div class="drilldown-row">
+          <span class="drilldown-rank">${i+1}</span>
+          <div class="drilldown-info">
+            <span class="drilldown-name">${p.desc}</span>
+            <span class="drilldown-meta">${p.marca} · ${p.roms.size} romaneios</span>
+          </div>
+          <div class="drilldown-bar-wrap">
+            <div class="drilldown-bar" style="width:${(p.qtd/maxQ*100).toFixed(1)}%"></div>
+          </div>
+          <span class="drilldown-qtd">${p.qtd}</span>
+        </div>`).join('')
+      }
+    </div>
+  `;
 }
 
 // ══ GESTÃO ══
@@ -1489,7 +1615,306 @@ document.addEventListener('DOMContentLoaded',()=>{
 });
 
 // ══ EXPOR GLOBAIS ══
-Object.assign(window,{showTab,filtrarMes,applyFilters,resetFilters,sortBy,setChip,toggleTheme,
+// ══════════════════════════════════════════════════════
+// PRODUTOS — FASE 2
+// ══════════════════════════════════════════════════════
+APP.produtos = [];
+APP.prodFiltrados = [];
+APP.prodPage = 1;
+const PROD_PER = 50;
+
+// Load produtos.json from same folder
+async function loadProdutos(){
+  if(APP.produtos.length > 0) return;
+  try{
+    setLoading(true,'Carregando produtos...');
+    const resp = await fetch('produtos.json');
+    if(!resp.ok) throw new Error('produtos.json não encontrado');
+    APP.produtos = await resp.json();
+    setLoading(false);
+    toast('✅ '+APP.produtos.length.toLocaleString('pt-BR')+' produtos carregados','green');
+    initProdFilters();
+    applyProdFilters();
+    document.getElementById('cnt-produtos').textContent = APP.produtos.length.toLocaleString('pt-BR');
+  }catch(e){
+    setLoading(false);
+    toast('❌ '+e.message,'red');
+  }
+}
+
+function renderProdutos(){
+  if(APP.produtos.length === 0){
+    loadProdutos();
+    return;
+  }
+  applyProdFilters();
+}
+window.renderProdutos = renderProdutos;
+
+function dadosProdFiltrados(){
+  const de=document.getElementById('pp-periodo-de')?.value||'';
+  const ate=document.getElementById('pp-periodo-ate')?.value||'';
+  const loja=document.getElementById('pp-loja')?.value||'';
+  const marca=document.getElementById('pp-marca')?.value||'';
+  const motivo=document.getElementById('pp-motivo')?.value||'';
+  const status=document.getElementById('pp-status')?.value||'';
+  const busca=document.getElementById('pp-busca')?.value.toLowerCase()||'';
+  return APP.produtos.filter(p=>{
+    if(de||ate){ if(!mesInRange(p.mes,de,ate)) return false; }
+    if(loja&&p.loja!==loja) return false;
+    if(marca&&p.marca_fornecedor!==marca) return false;
+    if(motivo&&p.motivo!==motivo) return false;
+    if(status&&p.status!==status) return false;
+    if(busca&&!p.descricao?.toLowerCase().includes(busca)) return false;
+    return true;
+  });
+}
+
+function applyProdFilters(){
+  updateProdPeriodLabel();
+  APP.prodFiltrados = dadosProdFiltrados();
+  APP.prodPage = 1;
+  renderProdDashboard();
+  renderProdTable();
+}
+window.applyProdFilters = applyProdFilters;
+
+function resetProdFilters(){
+  ['pp-periodo-de','pp-periodo-ate','pp-loja','pp-marca','pp-motivo','pp-status','pp-busca'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.value='';
+  });
+  updateProdPeriodLabel(); applyProdFilters();
+}
+window.resetProdFilters = resetProdFilters;
+
+function initProdFilters(){
+  const meses=getMeses();
+  ['pp-periodo-de','pp-periodo-ate'].forEach(id=>{
+    const el=document.getElementById(id); if(!el) return;
+    while(el.options.length>1) el.remove(1);
+    meses.forEach(m=>{el.add(new Option(m,m));});
+  });
+  // Presets
+  const grid=document.getElementById('pp-presets-grid');
+  if(grid){
+    const presets=[];
+    if(meses.length>=1) presets.push({label:'Último mês',de:meses[meses.length-1],ate:meses[meses.length-1]});
+    if(meses.length>=3) presets.push({label:'Últ. 3 meses',de:meses[meses.length-3],ate:meses[meses.length-1]});
+    presets.push({label:'Tudo',de:'',ate:''});
+    const anos=[...new Set(meses.map(m=>m.split('/')[1]))].sort();
+    anos.forEach(ano=>{
+      const doAno=meses.filter(m=>m.endsWith('/'+ano));
+      if(doAno.length>0) presets.push({label:'Ano '+ano,de:doAno[0],ate:doAno[doAno.length-1]});
+    });
+    grid.innerHTML=presets.map(p=>`<button class="period-preset-btn" onclick="window.applyProdPreset('${p.de}','${p.ate}')">${p.label}</button>`).join('');
+  }
+  // Lojas
+  const lojas=[...new Set(APP.produtos.map(p=>p.loja))].filter(Boolean).sort((a,b)=>+a-+b);
+  const sl=document.getElementById('pp-loja');
+  if(sl){ while(sl.options.length>1)sl.remove(1); lojas.forEach(l=>sl.add(new Option('Loja '+l,l))); }
+  // Marcas fornecedor
+  const marcas=[...new Set(APP.produtos.map(p=>p.marca_fornecedor||''))].filter(Boolean).sort();
+  const sm=document.getElementById('pp-marca');
+  if(sm){ while(sm.options.length>1)sm.remove(1); marcas.forEach(m=>sm.add(new Option(m,m))); }
+}
+
+function applyProdPreset(de,ate){
+  const elDe=document.getElementById('pp-periodo-de');
+  const elAte=document.getElementById('pp-periodo-ate');
+  if(elDe) elDe.value=de; if(elAte) elAte.value=ate;
+  updateProdPeriodLabel(); applyProdFilters();
+}
+window.applyProdPreset = applyProdPreset;
+
+function updateProdPeriodLabel(){
+  const de=document.getElementById('pp-periodo-de')?.value||'';
+  const ate=document.getElementById('pp-periodo-ate')?.value||'';
+  const lbl=document.getElementById('pp-period-label');
+  if(!lbl) return;
+  if(!de&&!ate){ lbl.textContent='Período'; lbl.style.color='var(--text-dim)'; return; }
+  if(de&&ate&&de===ate) lbl.textContent=de;
+  else if(de&&ate) lbl.textContent=de+' → '+ate;
+  else lbl.textContent=de||ate;
+  lbl.style.color='var(--amber)';
+}
+window.updateProdPeriodLabel = updateProdPeriodLabel;
+
+function toggleProdPeriodDd(){
+  const panel=document.getElementById('pp-period-panel');
+  if(!panel) return;
+  panel.style.display=panel.style.display==='none'?'block':'none';
+}
+window.toggleProdPeriodDd = toggleProdPeriodDd;
+document.addEventListener('click',function(e){
+  const btn=document.getElementById('pp-period-btn');
+  const panel=document.getElementById('pp-period-panel');
+  if(btn&&panel&&!btn.contains(e.target)&&!panel.contains(e.target)) panel.style.display='none';
+});
+
+function renderProdDashboard(){
+  const d = APP.prodFiltrados;
+  if(!d.length){
+    document.getElementById('prod-kpi-grid').innerHTML='<div style="color:var(--text-dim);padding:12px">Nenhum produto encontrado para os filtros selecionados.</div>';
+    return;
+  }
+  const totalQtd = d.reduce((a,b)=>a+b.quantidade,0);
+  const totalRom = new Set(d.map(p=>p.romaneio)).size;
+  const totalProd = new Set(d.map(p=>p.cod_produto)).size;
+  const totalMarcas = new Set(d.map(p=>p.marca_fornecedor)).size;
+  const totalValor = [...new Set(d.map(p=>p.romaneio))].reduce((acc,rom)=>{
+    const p = d.find(x=>x.romaneio===rom);
+    return acc + (p?.valor_romaneio||0);
+  },0);
+  const maisProblema = Object.entries(d.reduce((a,p)=>{a[p.descricao]=(a[p.descricao]||0)+p.quantidade;return a;},{}))
+    .sort((a,b)=>b[1]-a[1])[0];
+
+  document.getElementById('prod-kpi-grid').innerHTML=`
+    <div class="kpi c-amber"><div class="kpi-label">Unidades devolvidas</div><div class="kpi-val">${totalQtd.toLocaleString('pt-BR')}</div><div class="kpi-sub">total no filtro</div></div>
+    <div class="kpi c-blue"><div class="kpi-label">Romaneios</div><div class="kpi-val">${totalRom.toLocaleString('pt-BR')}</div><div class="kpi-sub">com produtos</div></div>
+    <div class="kpi c-purple"><div class="kpi-label">Produtos distintos</div><div class="kpi-val">${totalProd.toLocaleString('pt-BR')}</div><div class="kpi-sub">SKUs únicos</div></div>
+    <div class="kpi c-green"><div class="kpi-label">Marcas envolvidas</div><div class="kpi-val">${totalMarcas}</div><div class="kpi-sub">fornecedores</div></div>
+    <div class="kpi c-amber"><div class="kpi-label">Valor dos romaneios</div><div class="kpi-val">${fmt(totalValor)}</div><div class="kpi-sub">valor total envolvido</div></div>
+    <div class="kpi c-red"><div class="kpi-label">Produto problemático</div><div class="kpi-val" style="font-size:12px;word-break:break-word">${maisProblema?maisProblema[0].substring(0,28)+'...':'—'}</div><div class="kpi-sub">${maisProblema?maisProblema[1]+' unidades':''}</div></div>
+  `;
+
+  // TOP 15 PRODUTOS ranking
+  const byProd = {};
+  d.forEach(p=>{
+    const k = p.cod_produto+'|'+p.descricao;
+    if(!byProd[k]) byProd[k]={qtd:0,roms:new Set(),marcas:new Set(),desc:p.descricao};
+    byProd[k].qtd += p.quantidade;
+    byProd[k].roms.add(p.romaneio);
+    byProd[k].marcas.add(p.marca_fornecedor||p.marca_produto);
+  });
+  const top15 = Object.values(byProd).sort((a,b)=>b.qtd-a.qtd).slice(0,15);
+  const maxQ = top15[0]?.qtd||1;
+  document.getElementById('prod-ranking').innerHTML = top15.map((p,i)=>`
+    <div style="display:flex;align-items:center;gap:10px">
+      <span style="font-family:var(--mono);font-size:10px;color:var(--text-dim);width:18px;text-align:right">${i+1}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.desc}</div>
+        <div style="height:4px;background:var(--bg2);border-radius:2px;margin-top:3px;overflow:hidden">
+          <div style="height:100%;border-radius:2px;background:${i<3?'var(--amber)':'var(--blue)'};width:${(p.qtd/maxQ*100).toFixed(1)}%;transition:width .5s"></div>
+        </div>
+      </div>
+      <span style="font-family:var(--mono);font-size:11px;font-weight:600;color:var(--amber);min-width:42px;text-align:right">${p.qtd}</span>
+      <span style="font-size:10px;color:var(--text-dim);min-width:50px">${p.roms.size} rom.</span>
+    </div>
+  `).join('');
+
+  // TOP MARCAS bar
+  const byMarca={};
+  d.forEach(p=>{const k=p.marca_fornecedor||p.marca_produto||'Sem marca';if(!byMarca[k])byMarca[k]=0;byMarca[k]+=p.quantidade;});
+  const topMarcas=Object.entries(byMarca).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  const maxM=topMarcas[0]?.[1]||1;
+  document.getElementById('prod-marcas-bar').innerHTML=topMarcas.map(([m,q])=>`
+    <div><div class="bar-header"><span class="bar-label">${m}</span><span class="bar-val">${q.toLocaleString('pt-BR')} un.</span></div>
+    <div class="bar-track"><div class="bar-fill" style="width:${(q/maxM*100).toFixed(1)}%;background:var(--purple)"></div></div></div>
+  `).join('');
+
+  // LOJAS bar
+  const byLoja={};
+  d.forEach(p=>{if(!byLoja[p.loja])byLoja[p.loja]=0;byLoja[p.loja]+=p.quantidade;});
+  const topLojas=Object.entries(byLoja).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const maxL=topLojas[0]?.[1]||1;
+  document.getElementById('prod-lojas-bar').innerHTML=topLojas.map(([l,q])=>`
+    <div><div class="bar-header"><span class="bar-label">Loja ${l}</span><span class="bar-val">${q.toLocaleString('pt-BR')} un.</span></div>
+    <div class="bar-track"><div class="bar-fill" style="width:${(q/maxL*100).toFixed(1)}%;background:var(--green)"></div></div></div>
+  `).join('');
+
+  // EVOLUÇÃO MENSAL
+  const meses=getMeses();
+  const byMes={};
+  d.forEach(p=>{if(!byMes[p.mes])byMes[p.mes]=0;byMes[p.mes]+=p.quantidade;});
+  const maxMes=Math.max(...meses.map(m=>byMes[m]||0))||1;
+  document.getElementById('prod-meses-bars').innerHTML=meses.map(m=>{
+    const v=byMes[m]||0; const h=Math.max(2,Math.round(v/maxMes*70));
+    return `<div class="month-col" onclick="window.applyProdPreset&&window.applyProdPreset('${m}','${m}')">
+      <div class="month-bar-wrap"><div class="month-bar" style="height:${h}px;background:var(--blue);opacity:.8"></div></div>
+      <div class="month-lbl">${m.split('/')[0]}</div><div class="month-val">${v>0?v.toLocaleString('pt-BR'):''}</div>
+    </div>`;
+  }).join('');
+
+  // PIE MOTIVO
+  const motivos={VALIDADE:0,DANIFICADO:0,ALTERADO:0};
+  d.forEach(p=>{if(motivos[p.motivo]!==undefined)motivos[p.motivo]+=p.quantidade;});
+  const mT=Object.values(motivos).reduce((a,b)=>a+b,0)||1;
+  const mC={VALIDADE:'#3b82f6',DANIFICADO:'#ef4444',ALTERADO:'#8b5cf6'};
+  const mN={VALIDADE:'Validade',DANIFICADO:'Danificado',ALTERADO:'Alterado'};
+  let sa=-Math.PI/2,ps='';
+  Object.entries(motivos).forEach(([k,v])=>{
+    const a=(v/mT)*2*Math.PI;
+    const x1=50+40*Math.cos(sa),y1=50+40*Math.sin(sa);
+    const x2=50+40*Math.cos(sa+a),y2=50+40*Math.sin(sa+a);
+    ps+=`<path d="M50,50 L${x1.toFixed(1)},${y1.toFixed(1)} A40,40 0 ${a>Math.PI?1:0},1 ${x2.toFixed(1)},${y2.toFixed(1)} Z" fill="${mC[k]}" opacity=".9"/>`;
+    sa+=a;
+  });
+  const pieSvg=document.getElementById('prod-pie');
+  if(pieSvg) pieSvg.innerHTML=ps+'<circle cx="50" cy="50" r="16" fill="var(--surface)"/>';
+  const pieLeg=document.getElementById('prod-pie-legend');
+  if(pieLeg) pieLeg.innerHTML=Object.entries(motivos).map(([k,v])=>`
+    <div class="legend-item"><div class="legend-dot" style="background:${mC[k]}"></div>${mN[k]}<span class="legend-pct">${(v/mT*100).toFixed(1)}%</span></div>
+  `).join('');
+}
+
+function renderProdTable(){
+  const busca=document.getElementById('prod-table-busca')?.value.toLowerCase()||'';
+  const sortKey=document.getElementById('prod-table-sort')?.value||'qtd';
+  let rows = busca ? APP.prodFiltrados.filter(p=>p.descricao?.toLowerCase().includes(busca)) : [...APP.prodFiltrados];
+
+  // Sort
+  if(sortKey==='qtd') rows.sort((a,b)=>b.quantidade-a.quantidade);
+  else if(sortKey==='romaneio') rows.sort((a,b)=>+b.romaneio-+a.romaneio);
+  else if(sortKey==='descricao') rows.sort((a,b)=>a.descricao?.localeCompare(b.descricao||'')||0);
+  else if(sortKey==='loja') rows.sort((a,b)=>+a.loja-+b.loja);
+
+  const total = rows.length;
+  const totalQtd = rows.reduce((a,b)=>a+b.quantidade,0);
+  document.getElementById('prod-table-info').innerHTML=`<strong>${total.toLocaleString('pt-BR')}</strong> linhas &nbsp;·&nbsp; <strong>${totalQtd.toLocaleString('pt-BR')}</strong> unidades`;
+
+  const start=(APP.prodPage-1)*PROD_PER;
+  const slice=rows.slice(start,start+PROD_PER);
+
+  const stCor={PENDENTE:'var(--text-dim)',EXTRAÍDO:'var(--blue)',NOTA_EMITIDA:'var(--amber)',RETIRADO:'var(--green)',DESCARTE:'var(--orange)'};
+  const mC={VALIDADE:'bm-VALIDADE',DANIFICADO:'bm-DANIFICADO',ALTERADO:'bm-ALTERADO'};
+
+  document.getElementById('prod-table-body').innerHTML=slice.map(p=>`
+    <tr>
+      <td class="td-mes">${p.mes||'-'}</td>
+      <td class="td-loja">${p.loja}</td>
+      <td class="td-rom">${p.romaneio}</td>
+      <td class="td-marca" title="${p.descricao}" style="max-width:220px">${p.descricao}</td>
+      <td style="font-size:11px;color:var(--text-mid)">${p.marca_fornecedor||p.marca_produto||'-'}</td>
+      <td style="font-family:var(--mono);font-weight:600;color:var(--amber)">${p.quantidade}</td>
+      <td><span class="bm ${mC[p.motivo]||''}">${p.motivo}</span></td>
+      <td><span style="font-size:10px;font-family:var(--mono);color:${stCor[p.status]||'var(--text-dim)'}">${p.status}</span></td>
+      <td class="td-val val-l">${fmtN(p.valor_romaneio||0)}</td>
+    </tr>
+  `).join('');
+
+  renderProdPagination(total);
+}
+window.renderProdTable = renderProdTable;
+
+function renderProdPagination(total){
+  const nPages=Math.ceil(total/PROD_PER);
+  const el=document.getElementById('prod-pagination');
+  if(!el) return;
+  if(nPages<=1){el.innerHTML='';return;}
+  let html=`<button class="pb" onclick="window.goProdP(${APP.prodPage-1})" ${APP.prodPage===1?'disabled':''}>‹</button>`;
+  for(let i=1;i<=nPages;i++){
+    if(i===1||i===nPages||Math.abs(i-APP.prodPage)<=2)
+      html+=`<button class="pb ${i===APP.prodPage?'active':''}" onclick="window.goProdP(${i})">${i}</button>`;
+    else if(Math.abs(i-APP.prodPage)===3) html+='<span style="color:var(--text-dim);padding:0 3px">…</span>';
+  }
+  html+=`<button class="pb" onclick="window.goProdP(${APP.prodPage+1})" ${APP.prodPage===nPages?'disabled':''}>›</button>`;
+  el.innerHTML=html;
+}
+
+function goProdP(p){APP.prodPage=p;renderProdTable();document.getElementById('section-produtos')?.scrollTo(0,0);}
+window.goProdP = goProdP;
+
+Object.assign(window,{showTab,filtrarMes,applyFilters,resetFilters,sortBy,setChip,toggleTheme,dashClick,dashClearSel,renderDashDrillDown,
   marcarFiltrados,renderPicker,selMarca,copiarExtracao,handleXlsx,importarPaste,
   renderHistorico,remMes,excluirRegistro,exportarCSV,exportarExcel,exportarTXT,
   toggleExportDd,abrirNovoRomaneio,fecharNovoRomaneio,salvarNovoRomaneio,
@@ -1841,6 +2266,25 @@ td{padding:9px 13px;color:var(--text-mid);vertical-align:middle;white-space:nowr
 .dash-filters-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:18px;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
 .dash-filter-tag{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
 .dash-tag{display:inline-flex;align-items:center;background:var(--amber-bg);border:1px solid var(--amber-border);color:var(--amber);font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px;white-space:nowrap}
+.dash-bar-item{cursor:pointer;padding:3px 6px;border-radius:6px;border:1.5px solid transparent;transition:all .15s;margin-bottom:2px}
+.dash-bar-item:hover{background:var(--surface2);border-color:var(--border)}
+.dash-bar-sel{background:var(--amber-bg)!important;border-color:var(--amber-border)!important}
+.dash-bar-dim{opacity:.35}
+.dash-legend-sel{background:var(--amber-bg)}
+.drilldown-panel{background:var(--surface);border:1.5px solid var(--amber-border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow-lg);margin-top:4px}
+.drilldown-header{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--amber-bg)}
+.drilldown-title{font-size:13px;font-weight:600;color:var(--amber);margin-bottom:3px}
+.drilldown-sub{font-size:11px;color:var(--text-mid)}
+.drilldown-sub strong{color:var(--text)}
+.drilldown-body{padding:12px 16px;display:flex;flex-direction:column;gap:6px;max-height:380px;overflow-y:auto}
+.drilldown-row{display:flex;align-items:center;gap:10px}
+.drilldown-rank{font-family:var(--mono);font-size:10px;color:var(--text-dim);width:18px;text-align:right;flex-shrink:0}
+.drilldown-info{display:flex;flex-direction:column;gap:1px;min-width:0;width:260px;flex-shrink:0}
+.drilldown-name{font-size:11px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.drilldown-meta{font-size:10px;color:var(--text-dim)}
+.drilldown-bar-wrap{flex:1;height:5px;background:var(--bg2);border-radius:3px;overflow:hidden}
+.drilldown-bar{height:100%;background:var(--amber);border-radius:3px;transition:width .4s cubic-bezier(.4,0,.2,1)}
+.drilldown-qtd{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--amber);min-width:36px;text-align:right;flex-shrink:0}
 @media print{
 @media print{.topbar,.nav-tabs,.filters-bar,.pagination,.ext-actions,.marca-picker,.btn,#toast,#loading-overlay,.seed-banner{display:none!important}.extracao-wrap{grid-template-columns:1fr}.extracao-result{border:none}body{background:white;color:black}}
 </style>
@@ -1918,6 +2362,7 @@ document.addEventListener('DOMContentLoaded', function(){
     <div class="nav-tab active" id="tab-dashboard" onclick="window.showTab&&window.showTab('dashboard')">📊 Dashboard</div>
     <div class="nav-tab" id="tab-gestao" onclick="window.showTab&&window.showTab('gestao')">📋 Gestão <span class="cnt" id="cnt-gestao">0</span></div>
     <div class="nav-tab" id="tab-extracao" onclick="window.showTab&&window.showTab('extracao')">📄 Extração</div>
+    <div class="nav-tab" id="tab-produtos" onclick="window.showTab&&window.showTab('produtos')">🔬 Produtos <span class="cnt" id="cnt-produtos">0</span></div>
     <div class="nav-tab" data-role="admin,editor" id="tab-importar" onclick="window.showTab&&window.showTab('importar')">➕ Importar</div>
   </div>
 
@@ -2016,11 +2461,11 @@ document.addEventListener('DOMContentLoaded', function(){
       <div class="kpi-grid" id="kpi-grid"></div>
       <div class="charts-row">
         <div class="chart-card" style="grid-column:span 2">
-          <div class="chart-title">Top 10 Marcas por Valor (R$)</div>
+          <div class="chart-title">Top Marcas por Valor (R$) — clique para filtrar</div>
           <div class="bar-list" id="chart-marcas"></div>
         </div>
         <div class="chart-card">
-          <div class="chart-title">Motivo</div>
+          <div class="chart-title">Motivo — clique para filtrar</div>
           <div class="pie-wrap">
             <svg width="90" height="90" viewBox="0 0 100 100" id="pie-motivo"></svg>
             <div class="pie-legend" id="legend-motivo"></div>
@@ -2029,19 +2474,139 @@ document.addEventListener('DOMContentLoaded', function(){
       </div>
       <div class="charts-row">
         <div class="chart-card">
-          <div class="chart-title">Evolução Mensal (R$)</div>
+          <div class="chart-title">Evolução Mensal (R$) — clique para filtrar</div>
           <div class="month-bars" id="chart-meses"></div>
         </div>
         <div class="chart-card">
-          <div class="chart-title">Top Lojas por Valor (R$)</div>
+          <div class="chart-title">Lojas por Valor (R$) — clique para filtrar</div>
           <div class="bar-list" id="chart-lojas"></div>
         </div>
         <div class="chart-card">
-          <div class="chart-title">Status dos Romaneios</div>
+          <div class="chart-title">Status — clique para filtrar</div>
           <div class="bar-list" id="chart-status"></div>
         </div>
       </div>
+
+      <!-- DRILL-DOWN PANEL -->
+      <div id="dash-drilldown" class="drilldown-panel" style="display:none"></div>
+
     </div>
+
+    <!-- PRODUTOS -->
+    <div class="section" id="section-produtos">
+
+      <!-- FILTROS PRODUTOS -->
+      <div class="dash-filters-bar" id="prod-filters-bar">
+        <div class="fg" style="position:relative">
+          <div class="flbl">Período</div>
+          <div id="pp-period-btn" class="period-btn" onclick="window.toggleProdPeriodDd&&window.toggleProdPeriodDd()">
+            <span style="font-size:14px">📅</span>
+            <span id="pp-period-label" style="flex:1">Período</span>
+            <span style="font-size:10px;opacity:.5">▾</span>
+          </div>
+          <div id="pp-period-panel" class="period-panel" style="display:none">
+            <div class="period-panel-inner">
+              <div class="period-row">
+                <div class="period-col"><div class="period-col-label">De</div>
+                  <select id="pp-periodo-de" class="period-select" onchange="window.updateProdPeriodLabel&&window.updateProdPeriodLabel();window.applyProdFilters&&window.applyProdFilters()"><option value="">Início</option></select>
+                </div>
+                <div class="period-arrow">→</div>
+                <div class="period-col"><div class="period-col-label">Até</div>
+                  <select id="pp-periodo-ate" class="period-select" onchange="window.updateProdPeriodLabel&&window.updateProdPeriodLabel();window.applyProdFilters&&window.applyProdFilters()"><option value="">Fim</option></select>
+                </div>
+              </div>
+              <div class="period-presets"><div class="period-preset-label">Atalhos</div>
+                <div class="period-presets-grid" id="pp-presets-grid"></div>
+              </div>
+              <div class="period-actions">
+                <button class="btn btn-sm btn-outline" onclick="document.getElementById('pp-periodo-de').value='';document.getElementById('pp-periodo-ate').value='';window.updateProdPeriodLabel();window.applyProdFilters()">✕ Limpar</button>
+                <button class="btn btn-sm btn-amber" onclick="window.toggleProdPeriodDd&&window.toggleProdPeriodDd()">Aplicar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="fg"><div class="flbl">Loja</div><select id="pp-loja" onchange="window.applyProdFilters&&window.applyProdFilters()"><option value="">Todas</option></select></div>
+        <div class="fg"><div class="flbl">Marca Fornecedor</div><select id="pp-marca" onchange="window.applyProdFilters&&window.applyProdFilters()" style="min-width:160px"><option value="">Todas</option></select></div>
+        <div class="fg"><div class="flbl">Motivo</div>
+          <select id="pp-motivo" onchange="window.applyProdFilters&&window.applyProdFilters()">
+            <option value="">Todos</option><option value="VALIDADE">Validade</option>
+            <option value="DANIFICADO">Danificado</option><option value="ALTERADO">Alterado</option>
+          </select>
+        </div>
+        <div class="fg"><div class="flbl">Status</div>
+          <select id="pp-status" onchange="window.applyProdFilters&&window.applyProdFilters()">
+            <option value="">Todos</option><option value="PENDENTE">Pendente</option>
+            <option value="NOTA_EMITIDA">Nota Emitida</option><option value="RETIRADO">Retirado</option>
+            <option value="DESCARTE">Descarte</option>
+          </select>
+        </div>
+        <div class="fg"><div class="flbl">Busca produto</div>
+          <input type="text" id="pp-busca" placeholder="Nome do produto..." oninput="window.applyProdFilters&&window.applyProdFilters()" style="min-width:180px">
+        </div>
+        <div class="fg"><button class="btn btn-outline" onclick="window.resetProdFilters&&window.resetProdFilters()">✕ Limpar</button></div>
+      </div>
+
+      <!-- KPIs PRODUTOS -->
+      <div class="kpi-grid" id="prod-kpi-grid" style="margin-bottom:20px"></div>
+
+      <!-- CHARTS ROW 1: Ranking + Marcas -->
+      <div class="charts-row" style="margin-bottom:20px">
+        <div class="chart-card" style="grid-column:span 2">
+          <div class="chart-title">🏆 Top 15 produtos com mais problemas (unidades devolvidas)</div>
+          <div id="prod-ranking" style="display:flex;flex-direction:column;gap:6px"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title">📦 Top marcas por unidades</div>
+          <div class="bar-list" id="prod-marcas-bar"></div>
+        </div>
+      </div>
+
+      <!-- CHARTS ROW 2: Lojas + Motivo + Evolução -->
+      <div class="charts-row" style="margin-bottom:20px">
+        <div class="chart-card">
+          <div class="chart-title">🏪 Unidades por loja</div>
+          <div class="bar-list" id="prod-lojas-bar"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title">📅 Evolução mensal (unidades)</div>
+          <div class="month-bars" id="prod-meses-bars"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title">⚠️ Por motivo</div>
+          <div class="pie-wrap">
+            <svg width="90" height="90" viewBox="0 0 100 100" id="prod-pie"></svg>
+            <div class="pie-legend" id="prod-pie-legend"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DRILL-DOWN TABELA -->
+      <div class="table-wrap">
+        <div class="table-hdr" style="justify-content:space-between">
+          <div class="table-info" id="prod-table-info"></div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="text" id="prod-table-busca" placeholder="Buscar produto..." oninput="window.renderProdTable&&window.renderProdTable()" style="width:200px">
+            <select id="prod-table-sort" onchange="window.renderProdTable&&window.renderProdTable()" style="font-size:12px">
+              <option value="qtd">↓ Maior qtd</option>
+              <option value="romaneio">↓ Romaneio</option>
+              <option value="descricao">A-Z Produto</option>
+              <option value="loja">Por loja</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table><thead><tr>
+            <th>Mês</th><th>Loja</th><th>Romaneio</th>
+            <th>Produto</th><th>Marca</th><th>Qtd</th>
+            <th>Motivo</th><th>Status</th><th>Vlr Romaneio</th>
+          </tr></thead>
+          <tbody id="prod-table-body"></tbody></table>
+        </div>
+        <div class="pagination" id="prod-pagination"></div>
+      </div>
+
+    </div>
+    <!-- /PRODUTOS -->
 
     <!-- GESTÃO -->
     <div class="section" id="section-gestao">
