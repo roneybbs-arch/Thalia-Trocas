@@ -539,6 +539,7 @@ function renderDashboard() {
   const descarte = d.filter(x=>x.status==='DESCARTE').length;
   const valDesc  = d.filter(x=>x.status==='DESCARTE').reduce((a,b)=>a+b.valor,0);
 
+  const hasSel=Object.values(APP.dashSel).some(v=>v);
   const periodoLabel=allTags.length?allTags.filter(t=>typeof t==='string').join(' · '):'Todos os períodos';
   const pctTotal=dAll.length>0?(d.length/dAll.length*100).toFixed(1):'100';
   document.getElementById('kpi-grid').innerHTML = `
@@ -557,7 +558,6 @@ function renderDashboard() {
   d.forEach(x=>{const k=x.marca?.trim()||'';if(!byMd[k])byMd[k]={v:0,n:0};byMd[k].v+=x.valor;byMd[k].n++;});
   const sM=Object.entries(byM).sort((a,b)=>b[1].v-a[1].v).slice(0,12);
   const maxM=sM[0]?.[1]?.v||1;
-  const hasSel=Object.values(APP.dashSel).some(v=>v);
   document.getElementById('chart-marcas').innerHTML=sM.map(([m,v],i)=>{
     const sel=APP.dashSel.marca===m;
     const inFilter=!!byMd[m];
