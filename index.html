@@ -561,7 +561,8 @@ function renderDashboard() {
   document.getElementById('chart-marcas').innerHTML=sM.map(([m,v],i)=>{
     const sel=APP.dashSel.marca===m;
     const inFilter=!!byMd[m];
-    const dimmed=hasSel&&!inFilter&&!sel;
+    const hasMarcaSel=!!APP.dashSel.marca;
+    const dimmed=hasMarcaSel&&!sel;
     const dv=byMd[m]||{v:0,n:0};
     return `<div class="dash-bar-item ${sel?'dash-bar-sel':''} ${dimmed?'dash-bar-dim':''}"
       onclick="window.dashClick('marca','${m.replace(/'/g,"\'")}')" title="Clique para filtrar por ${m}">
@@ -613,7 +614,8 @@ function renderDashboard() {
     const hD=hasSel?Math.max(0,Math.round(vD/maxMes*70)):hAll;
     const sel=APP.dashSel.mes===m;
     const hasData=hasSel?vD>0:vAll>0;
-    return `<div class="month-col" style="opacity:${hasSel&&!hasData?.3:1};transition:opacity .2s" onclick="window.dashClick('mes','${m}')" title="${m}: ${fmt(hasSel?vD:vAll)}">
+    const hasMesSel=!!APP.dashSel.mes;
+    return `<div class="month-col" style="opacity:${hasMesSel&&!sel?.3:1};transition:opacity .2s" onclick="window.dashClick('mes','${m}')" title="${m}: ${fmt(hasSel?vD:vAll)}">
       <div class="month-bar-wrap" style="position:relative">
         <div style="position:absolute;bottom:0;left:0;right:0;height:${hAll}px;background:var(--border2);border-radius:3px 3px 0 0;transition:height .4s"></div>
         <div class="month-bar" style="height:${hD}px;background:${sel?'#f59e0b':hasSel&&hasData?'#f59e0b':'#3b82f6'};box-shadow:${sel||hasSel&&hasData?'0 0 6px rgba(245,158,11,.4)':'none'};position:relative;transition:all .35s"></div>
@@ -630,7 +632,8 @@ function renderDashboard() {
   document.getElementById('chart-lojas').innerHTML=sL.map(([l,v])=>{
     const sel=APP.dashSel.loja===l;
     const inF=byLd[l]>0;
-    const dimmed=hasSel&&!inF;
+    const hasLojaSel=!!APP.dashSel.loja;
+    const dimmed=hasLojaSel&&!sel;
     const vD=byLd[l]||0;
     return `<div class="dash-bar-item ${sel?'dash-bar-sel':''} ${dimmed?'dash-bar-dim':''}" onclick="window.dashClick('loja','${l}')" title="Loja ${l} — clique para filtrar">
       <div class="bar-header"><span class="bar-label" style="font-weight:${inF&&hasSel?'600':'400'}">Loja ${l}</span>
@@ -642,6 +645,8 @@ function renderDashboard() {
     </div>`;
   }).join('');
   // Status — CLICÁVEIS + REATIVOS
+  // Status — usa d para barras reativas, dAll para contexto
+  // dimmed só quando o próprio status está sendo filtrado por clique
   const bySt={PENDENTE:0,EXTRAÍDO:0,NOTA_EMITIDA:0,RETIRADO:0,DESCARTE:0};
   const byStD={PENDENTE:0,EXTRAÍDO:0,NOTA_EMITIDA:0,RETIRADO:0,DESCARTE:0};
   dAll.forEach(x=>{if(bySt[x.status]!==undefined)bySt[x.status]++;});
@@ -649,17 +654,21 @@ function renderDashboard() {
   const stC={PENDENTE:'#64748b',EXTRAÍDO:'#3b82f6',NOTA_EMITIDA:'#f59e0b',RETIRADO:'#10b981',DESCARTE:'#f97316'};
   const stL={PENDENTE:'Pendente',EXTRAÍDO:'Extraído',NOTA_EMITIDA:'Nota Emitida',RETIRADO:'Retirado',DESCARTE:'Descarte'};
   const maxSt=Math.max(...Object.values(bySt))||1;
+  const hasStSel=!!APP.dashSel.status; // só dim quando STATUS foi clicado
   document.getElementById('chart-status').innerHTML=Object.entries(bySt).map(([s,v])=>{
     const sel=APP.dashSel.status===s;
     const vD=byStD[s]||0;
-    const inF=vD>0;
-    const dimmed=hasSel&&!inF;
+    // Barra de fundo = dAll, barra de frente = d
+    const dimmed=hasStSel&&!sel;
     return `<div class="dash-bar-item ${sel?'dash-bar-sel':''} ${dimmed?'dash-bar-dim':''}" onclick="window.dashClick('status','${s}')" title="Clique para filtrar: ${stL[s]}">
-      <div class="bar-header"><span class="bar-label" style="font-weight:${inF&&hasSel?'600':'400'}">${stL[s]}</span>
-        <span class="bar-val">${hasSel?vD:v}</span></div>
+      <div class="bar-header">
+        <span class="bar-label" style="font-weight:${sel?'600':'400'}">${stL[s]}</span>
+        <span class="bar-val">${hasSel?vD:v}</span>
+      </div>
       <div class="bar-track" style="position:relative">
         <div style="position:absolute;inset:0;background:var(--border2);border-radius:3px"></div>
-        <div class="bar-fill" style="width:${hasSel?(vD/maxSt*100).toFixed(1):(v/maxSt*100).toFixed(1)}%;background:${sel?'var(--amber)':inF&&hasSel?'#f59e0b':stC[s]};position:relative;transition:width .4s,background .3s"></div>
+        <div class="bar-fill" style="width:${(v/maxSt*100).toFixed(1)}%;background:var(--border);position:absolute;top:0;left:0;height:100%;border-radius:3px"></div>
+        <div class="bar-fill" style="width:${(vD/maxSt*100).toFixed(1)}%;background:${sel?'var(--amber)':stC[s]};position:relative;transition:width .4s,background .3s"></div>
       </div>
     </div>`;
   }).join('');
