@@ -558,26 +558,11 @@ function renderDashboard() {
   const byM={}, byMd={};
   dAll.forEach(x=>{const k=x.marca?.trim()||'';if(!byM[k])byM[k]={v:0,n:0};byM[k].v+=x.valor;byM[k].n++;});
   d.forEach(x=>{const k=x.marca?.trim()||'';if(!byMd[k])byMd[k]={v:0,n:0};byMd[k].v+=x.valor;byMd[k].n++;});
-  const sM=Object.entries(byM).sort((a,b)=>b[1].v-a[1].v).slice(0,12);
+  const sM=Object.entries(byM).sort((a,b)=>b[1].v-a[1].v);
   const maxM=sM[0]?.[1]?.v||1;
-  document.getElementById('chart-marcas').innerHTML=sM.map(([m,v],i)=>{
-    const sel=APP.dashSel.marca===m;
-    const inFilter=!!byMd[m];
-    const hasMarcaSel=!!APP.dashSel.marca;
-    const dimmed=hasMarcaSel&&!sel;
-    const dv=byMd[m]||{v:0,n:0};
-    return `<div class="dash-bar-item ${sel?'dash-bar-sel':''} ${dimmed?'dash-bar-dim':''}"
-      onclick="window.dashClick('marca','${m.replace(/'/g,"\'")}')" title="Clique para filtrar por ${m}">
-      <div class="bar-header">
-        <span class="bar-label" style="font-weight:${inFilter&&hasSel?'600':'400'}">${i+1}. ${m}</span>
-        <span class="bar-val">${hasSel&&inFilter?fmt(dv.v)+' · '+dv.n+' rom.':fmt(v.v)+' · '+v.n+' rom.'}</span>
-      </div>
-      <div class="bar-track" style="position:relative">
-        <div class="bar-fill" style="width:${(v.v/maxM*100).toFixed(1)}%;background:var(--border2);position:absolute;top:0;left:0;height:100%;border-radius:3px"></div>
-        <div class="bar-fill" style="width:${hasSel?(dv.v/maxM*100).toFixed(1):((v.v/maxM)*100).toFixed(1)}%;background:${sel?'var(--amber)':inFilter&&hasSel?'#f59e0b':i<3?'#e8a020':'#3b82f6'};position:relative;transition:width .4s,background .3s"></div>
-      </div>
-    </div>`;
-  }).join('');
+    // Store for search filter + render
+  APP.dashMarcas = {sM, byMd, maxM};
+  renderMarcasChart();
   // Pie motivos — CLICÁVEL + REATIVO
   const motivos={VALIDADE:0,DANIFICADO:0,ALTERADO:0};
   const motivosD={VALIDADE:0,DANIFICADO:0,ALTERADO:0};
@@ -2052,7 +2037,45 @@ document.addEventListener('DOMContentLoaded',function(){
   }
 });
 
-Object.assign(window,{showTab,filtrarMes,applyFilters,resetFilters,sortBy,setChip,toggleTheme,dashClick,dashClearSel,renderDashDrillDown,
+
+function renderMarcasChart(){
+  if(!APP.dashMarcas) return;
+  const {sM, byMd, maxM} = APP.dashMarcas;
+  const hasSel = Object.values(APP.dashSel).some(v=>v);
+  const hasMarcaSel = !!APP.dashSel.marca;
+  const busca = (document.getElementById('marcas-busca')?.value||'').toLowerCase();
+  const filtered = busca ? sM.filter(([m])=>m.toLowerCase().includes(busca)) : sM;
+  // Update count badge
+  const cnt = document.getElementById('marcas-count');
+  if(cnt) cnt.textContent = busca ? `${filtered.length} de ${sM.length} marcas` : `${sM.length} marcas`;
+  if(!filtered.length){
+    document.getElementById('chart-marcas').innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-dim);font-size:12px">Nenhuma marca encontrada</div>';
+    return;
+  }
+  document.getElementById('chart-marcas').innerHTML = filtered.map(([m,v])=>{
+    const idx = sM.findIndex(([mk])=>mk===m)+1;
+    const sel = APP.dashSel.marca===m;
+    const inFilter = !!byMd[m];
+    const dimmed = hasMarcaSel&&!sel;
+    const dv = byMd[m]||{v:0,n:0};
+    const esc = m.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    return `<div class="dash-bar-item ${sel?'dash-bar-sel':''} ${dimmed?'dash-bar-dim':''}"
+      onclick="window.dashClick('marca','${esc}')" title="${m}">
+      <div class="bar-header">
+        <span class="bar-label" style="font-weight:${sel?'700':inFilter&&hasSel?'600':'400'};font-size:11px">${idx}. ${m}</span>
+        <span class="bar-val">${hasSel&&inFilter?fmt(dv.v)+' · '+dv.n+' rom.':fmt(v.v)+' · '+v.n+' rom.'}</span>
+      </div>
+      <div class="bar-track" style="position:relative;height:5px">
+        <div style="position:absolute;inset:0;background:var(--border2);border-radius:3px"></div>
+        <div class="bar-fill" style="height:5px;width:${hasSel?(dv.v/maxM*100).toFixed(1):((v.v/maxM)*100).toFixed(1)}%;background:${sel?'var(--amber)':inFilter&&hasSel?'#f59e0b':idx<=3?'#e8a020':idx<=10?'#3b82f6':'var(--text-dim)'};position:relative;transition:width .4s,background .3s"></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+window.renderMarcasChart = renderMarcasChart;
+window.filtrarMarcasChart = renderMarcasChart;
+
+Object.assign(window,{showTab,filtrarMes,applyFilters,resetFilters,sortBy,setChip,toggleTheme,dashClick,dashClearSel,renderDashDrillDown,renderMarcasChart,filtrarMarcasChart,
   marcarFiltrados,renderPicker,selMarca,copiarExtracao,handleXlsx,importarPaste,
   renderHistorico,remMes,excluirRegistro,exportarCSV,exportarExcel,exportarTXT,
   toggleExportDd,abrirNovoRomaneio,fecharNovoRomaneio,salvarNovoRomaneio,
@@ -2423,6 +2446,9 @@ td{padding:9px 13px;color:var(--text-mid);vertical-align:middle;white-space:nowr
 .drilldown-bar-wrap{flex:1;height:5px;background:var(--bg2);border-radius:3px;overflow:hidden}
 .drilldown-bar{height:100%;background:var(--amber);border-radius:3px;transition:width .4s cubic-bezier(.4,0,.2,1)}
 .drilldown-qtd{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--amber);min-width:36px;text-align:right;flex-shrink:0}
+#chart-marcas::-webkit-scrollbar{width:4px}
+#chart-marcas::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+#chart-marcas::-webkit-scrollbar-track{background:transparent}
 @media print{
 @media print{.topbar,.nav-tabs,.filters-bar,.pagination,.ext-actions,.marca-picker,.btn,#toast,#loading-overlay,.seed-banner{display:none!important}.extracao-wrap{grid-template-columns:1fr}.extracao-result{border:none}body{background:white;color:black}}
 </style>
@@ -2599,8 +2625,14 @@ document.addEventListener('DOMContentLoaded', function(){
       <div class="kpi-grid" id="kpi-grid"></div>
       <div class="charts-row">
         <div class="chart-card" style="grid-column:span 2">
-          <div class="chart-title">Top Marcas por Valor (R$) — clique para filtrar</div>
-          <div class="bar-list" id="chart-marcas"></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:10px">
+            <div class="chart-title" style="margin-bottom:0">Marcas por Valor (R$) — clique para filtrar</div>
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+              <span id="marcas-count" style="font-family:var(--mono);font-size:10px;color:var(--text-dim);background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:2px 8px"></span>
+              <input type="text" id="marcas-busca" placeholder="Buscar marca..." oninput="window.filtrarMarcasChart&&window.filtrarMarcasChart()" style="font-size:12px;padding:4px 10px;width:160px;border-radius:6px">
+            </div>
+          </div>
+          <div id="chart-marcas" style="max-height:420px;overflow-y:auto;padding-right:4px"></div>
         </div>
         <div class="chart-card">
           <div class="chart-title">Motivo — clique para filtrar</div>
