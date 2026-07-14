@@ -2277,28 +2277,69 @@ function handleCurvaXlsx(evt){
   const isCsv = file.name.toLowerCase().endsWith('.csv');
 
   function processRaw(raw){
-    let ok=0, skip=0;
-    const novo={};
-    // detect header
+    let skip=0;
+    // detect header row
     let start=0;
     const h0=String(raw[0]?.[0]||'').toUpperCase();
     if(isNaN(Number(h0))||h0.includes('COD')||h0.includes('PROD')) start=1;
+
+    // detect columns: could be COD|CURVA or COD|LOJA|CURVA
+    // check header or first data row to find curva column index
+    const headerRow = raw[start-1] || raw[start] || [];
+    const hCols = headerRow.map(c=>String(c||'').toUpperCase());
+    let colCod=0, colCurva=-1;
+    // try to find by header name
+    hCols.forEach((h,i)=>{
+      if(h.includes('COD')||h.includes('PROD')) colCod=i;
+      if(h==='CURVA'||h==='CURVA ABC'||h==='CLASSIF') colCurva=i;
+    });
+    // if not found by name, detect by position: last column that contains A/B/C
+    if(colCurva<0){
+      // sample first data row
+      const sample=raw[start]||[];
+      for(let i=sample.length-1;i>=1;i--){
+        if(['A','B','C'].includes(String(sample[i]||'').trim().toUpperCase())){
+          colCurva=i; break;
+        }
+      }
+      if(colCurva<0) colCurva=raw[0]?.length>=3?2:1; // fallback: 3 cols=idx2, 2 cols=idx1
+    }
+
+    // Accumulate votes per product (moda entre lojas)
+    // votes[cod] = {A:0, B:0, C:0}
+    const votes={};
     for(let i=start;i<raw.length;i++){
       const row=raw[i];
       if(!row||row.every(c=>String(c||'').trim()==='')) continue;
-      const cod=String(row[0]||'').trim();
-      const curva=String(row[1]||'').trim().toUpperCase();
+      const cod=String(row[colCod]||'').trim();
+      const curva=String(row[colCurva]||'').trim().toUpperCase();
       if(!cod){skip++;continue;}
       if(!['A','B','C'].includes(curva)){skip++;continue;}
-      novo[cod]=curva; ok++;
+      if(!votes[cod]) votes[cod]={A:0,B:0,C:0};
+      votes[cod][curva]++;
     }
+
+    // Resolve moda: curva that appears most for each product
+    // Tie-break: A > B > C (more conservative = more relevant for analysis)
+    const novo={};
+    let ok=0, multi=0;
+    Object.entries(votes).forEach(([cod,v])=>{
+      const max=Math.max(v.A,v.B,v.C);
+      const winners=['A','B','C'].filter(c=>v[c]===max);
+      novo[cod]=winners[0]; // tie-break already A>B>C
+      if(winners.length>1) multi++;
+      ok++;
+    });
+
     APP.curvaABC=novo; APP.curvaQtd=ok; APP.curvaImportadaEm=new Date();
     const dataRef=document.getElementById('curva-data-ref')?.value||'';
     const badge=document.getElementById('curva-status-badge');
     if(badge) badge.innerHTML=`<span style="color:var(--green);font-weight:600">✅ ${ok.toLocaleString('pt-BR')} produtos com curva</span>${dataRef?' · ref: '+dataRef:''}`;
-    if(log) log.innerHTML=`<span class="log-ok">✅ ${ok.toLocaleString('pt-BR')} produtos importados (A/B/C)</span>`
+    if(log) log.innerHTML=`<span class="log-ok">✅ ${ok.toLocaleString('pt-BR')} produtos mapeados · coluna curva detectada: índice ${colCurva}</span>`
+      +(multi>0?`
+<span class="log-warn">⚠ ${multi} produtos com curva diferente entre lojas → usada a moda (mais frequente)</span>`:'')
       +(skip>0?`
-<span class="log-warn">⚠ ${skip} linhas ignoradas (curva inválida ou cod vazio)</span>`:'');
+<span class="log-warn">⚠ ${skip} linhas ignoradas</span>`:'');
     toast('✅ Curva ABC atualizada — '+ok.toLocaleString('pt-BR')+' produtos','green');
     if(document.getElementById('subpanel-curva')?.style.display!=='none') renderCurvaABC();
   }
@@ -3721,7 +3762,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
         <div class="import-card full" data-role="admin">
           <h2>📊 Importar Curva ABC do ERP</h2>
-          <p>Arraste o arquivo .xlsx com a curva ABC extraída do ERP. Colunas esperadas: <strong>CÓD. PRODUTO · CURVA</strong> (valores: A, B ou C).<br>
+          <p>Arraste o arquivo .xlsx com a curva ABC extraída do ERP. Colunas esperadas: <strong>CÓD. PRODUTO · CURVA</strong> ou <strong>CÓD. PRODUTO · LOJA · CURVA</strong> (valores: A, B ou C). A coluna de loja é opcional — se existir, a curva final de cada produto será a <strong>moda entre as lojas</strong> (a que aparece mais vezes).<br>
           A curva é uma tabela de referência global — ao importar, a versão anterior é completamente substituída. Recomendado atualizar a cada 15 dias.</p>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
             <div class="fg">
@@ -3738,7 +3779,7 @@ document.addEventListener('DOMContentLoaded', function(){
             <input type="file" accept=".xlsx,.xls,.csv" onchange="window.handleCurvaXlsx&&window.handleCurvaXlsx(event)">
             <div class="drop-icon">📊</div>
             <div class="drop-title">Arraste o .xlsx da Curva ABC aqui ou clique para selecionar</div>
-            <div class="drop-sub">Aceita .xlsx ou .csv · Colunas: CÓD. PRODUTO · CURVA (A / B / C)</div>
+            <div class="drop-sub">Aceita .xlsx ou .csv · Colunas: CÓD. PRODUTO · CURVA ou CÓD. PRODUTO · LOJA · CURVA</div>
           </div>
           <div class="import-log" id="curva-import-log">Aguardando arquivo de curva ABC...</div>
         </div>
