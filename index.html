@@ -1237,8 +1237,13 @@ function applyFilters(){
       const rom=p.romaneio;
       const cv=getCurva(p.cod_produto);
       if(!romCurvaSet[rom]) romCurvaSet[rom]=new Set();
-      romCurvaSet[rom].add(cv);
+      if(['A','B','C','D','E'].includes(cv)) romCurvaSet[rom].add(cv);
+      // Only add '?' if product truly has no mapping
+      else romCurvaSet[rom].add('?');
     });
+  } else if(filtCurva.length>0){
+    // produtos not loaded — can't filter by curva
+    romCurvaSet={};
   }
 
   APP.filtrados=dadosAtivos().filter(d=>{
@@ -1266,8 +1271,9 @@ function applyFilters(){
 function resetFilters(){
   APP.curvaFiltros=[];
   ['cd-A','cd-B','cd-C','cd-D','cd-E','cd-X'].forEach(id=>{const el=document.getElementById(id);if(el)el.checked=false;});
-  const cdAll=document.getElementById('cd-ALL');if(cdAll)cdAll.checked=true;
+  const cdAll2=document.getElementById('cd-ALL');if(cdAll2)cdAll2.checked=true;
   const cvLbl=document.getElementById('curva-dd-label');if(cvLbl)cvLbl.textContent='Todas';
+  const fCv=document.getElementById('f-curva');if(fCv)fCv.value='';
   ['f-busca','f-loja','f-motivo','f-comp','f-curva','f-mes','f-periodo-de','f-periodo-ate'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.value='';
   });
@@ -3012,26 +3018,33 @@ function toggleCurvaDd(){
 window.toggleCurvaDd=toggleCurvaDd;
 
 function toggleCurvaOpt(k){
-  const isAll=k==='ALL';
-  if(isAll){
-    const allChk=document.getElementById('cd-ALL');
-    const all=allChk?.checked;
-    ['A','B','C','D','E','?'].forEach(c=>{
+  if(k==='ALL'){
+    ['A','B','C','D','E','X'].forEach(c=>{
       const el=document.getElementById('cd-'+c); if(el) el.checked=false;
     });
+    const allEl=document.getElementById('cd-ALL'); if(allEl) allEl.checked=true;
     APP.curvaFiltros=[];
-  } else {
-    document.getElementById('cd-ALL').checked=false;
-    const el=document.getElementById('cd-'+k);
-    if(el) el.checked=!el.checked;
+    document.getElementById('curva-dd-label').textContent='Todas';
+    const inp=document.getElementById('f-curva'); if(inp) inp.value='';
+    applyFilters();
+    return;
   }
+  // Toggle this option
+  const el=document.getElementById('cd-'+k); if(!el) return;
+  el.checked=!el.checked;
+  // Uncheck "Todas" if anything selected
+  const allEl=document.getElementById('cd-ALL'); if(allEl) allEl.checked=false;
   applyCurvaFilter();
 }
 window.toggleCurvaOpt=toggleCurvaOpt;
 
 function applyCurvaFilter(){
+  // Map checkbox IDs to curva values (X = ?)
+  const idMap={A:'A',B:'B',C:'C',D:'D',E:'E',X:'?'};
+  const selected=Object.entries(idMap)
+    .filter(([id])=>document.getElementById('cd-'+id)?.checked)
+    .map(([,v])=>v);
   const allChk=document.getElementById('cd-ALL');
-  const selected=['A','B','C','D','E','?'].filter(c=>document.getElementById('cd-'+c)?.checked);
   if(!selected.length){
     if(allChk) allChk.checked=true;
     APP.curvaFiltros=[];
@@ -3039,10 +3052,10 @@ function applyCurvaFilter(){
   } else {
     if(allChk) allChk.checked=false;
     APP.curvaFiltros=selected;
-    const lbl=selected.length===1?'Curva '+selected[0]:selected.map(c=>'Curva '+c).join(', ');
+    const lbls=selected.map(c=>c==='?'?'Sem curva':'Curva '+c);
+    const lbl=lbls.length<=2?lbls.join(' + '):lbls.length+' curvas';
     document.getElementById('curva-dd-label').textContent=lbl;
   }
-  // Sync hidden input for export info
   const inp=document.getElementById('f-curva');
   if(inp) inp.value=APP.curvaFiltros.join(',');
   applyFilters();
@@ -4066,35 +4079,35 @@ document.addEventListener('DOMContentLoaded', function(){
           <div id="curva-dd-btn" onclick="window.toggleCurvaDd&&window.toggleCurvaDd()" style="display:flex;align-items:center;gap:6px;background:var(--bg2);border:1.5px solid var(--border);color:var(--text);border-radius:7px;padding:6px 10px;cursor:pointer;min-width:120px;font-size:13px;user-select:none;transition:border-color .15s">
             <span id="curva-dd-label">Todas</span><span style="font-size:10px;opacity:.5;margin-left:auto">▾</span>
           </div>
-          <div class="status-dd" id="curva-dd" style="display:none;position:absolute;top:100%;right:0;z-index:300;background:var(--surface);border:1.5px solid var(--border2);border-radius:var(--radius);padding:6px 0;min-width:150px;box-shadow:var(--shadow-lg);margin-top:4px">
-            <label class="sd-item" onclick="window.toggleCurvaOpt('ALL')">
-              <input type="checkbox" id="cd-ALL" checked onchange="window.applyCurvaFilter()">
+          <div id="curva-dd" style="display:none;position:absolute;top:calc(100% + 4px);right:0;z-index:400;background:var(--surface);border:1.5px solid var(--border2);border-radius:8px;padding:6px 0;min-width:160px;box-shadow:var(--shadow-lg)">
+            <div class="sd-item" onclick="window.toggleCurvaOpt('ALL');event.stopPropagation()">
+              <input type="checkbox" id="cd-ALL" checked onclick="event.stopPropagation()">
               <span>Todas</span>
-            </label>
-            <label class="sd-item" onclick="window.toggleCurvaOpt('A')">
-              <input type="checkbox" id="cd-A" onchange="window.applyCurvaFilter()">
+            </div>
+            <div class="sd-item" onclick="window.toggleCurvaOpt('A');event.stopPropagation()">
+              <input type="checkbox" id="cd-A" onclick="event.stopPropagation()">
               <span style="color:var(--red)">■ Curva A 🚨</span>
-            </label>
-            <label class="sd-item" onclick="window.toggleCurvaOpt('B')">
-              <input type="checkbox" id="cd-B" onchange="window.applyCurvaFilter()">
+            </div>
+            <div class="sd-item" onclick="window.toggleCurvaOpt('B');event.stopPropagation()">
+              <input type="checkbox" id="cd-B" onclick="event.stopPropagation()">
               <span style="color:var(--amber)">■ Curva B</span>
-            </label>
-            <label class="sd-item" onclick="window.toggleCurvaOpt('C')">
-              <input type="checkbox" id="cd-C" onchange="window.applyCurvaFilter()">
+            </div>
+            <div class="sd-item" onclick="window.toggleCurvaOpt('C');event.stopPropagation()">
+              <input type="checkbox" id="cd-C" onclick="event.stopPropagation()">
               <span style="color:var(--green)">■ Curva C</span>
-            </label>
-            <label class="sd-item" onclick="window.toggleCurvaOpt('D')">
-              <input type="checkbox" id="cd-D" onchange="window.applyCurvaFilter()">
+            </div>
+            <div class="sd-item" onclick="window.toggleCurvaOpt('D');event.stopPropagation()">
+              <input type="checkbox" id="cd-D" onclick="event.stopPropagation()">
               <span style="color:#8b5cf6">■ Curva D</span>
-            </label>
-            <label class="sd-item" onclick="window.toggleCurvaOpt('E')">
-              <input type="checkbox" id="cd-E" onchange="window.applyCurvaFilter()">
+            </div>
+            <div class="sd-item" onclick="window.toggleCurvaOpt('E');event.stopPropagation()">
+              <input type="checkbox" id="cd-E" onclick="event.stopPropagation()">
               <span style="color:var(--text-dim)">■ Curva E</span>
-            </label>
-            <label class="sd-item" onclick="window.toggleCurvaOpt('?')">
-              <input type="checkbox" id="cd-X" onchange="window.applyCurvaFilter()">
+            </div>
+            <div class="sd-item" onclick="window.toggleCurvaOpt('?');event.stopPropagation()">
+              <input type="checkbox" id="cd-X" onclick="event.stopPropagation()">
               <span>Sem curva</span>
-            </label>
+            </div>
           </div>
         </div>
         <input type="hidden" id="f-curva" value="">
