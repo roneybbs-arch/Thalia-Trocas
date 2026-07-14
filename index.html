@@ -828,10 +828,159 @@ function renderDashboard() {
       </div>
     </div>`;
   }).join('');
+  renderCurvaChart();
   renderDashDrillDown(d);
 }
 
 // ── DRILL-DOWN de produtos no dashboard ──────────────────────────────
+// ══ CURVA × PRODUTOS CHART (Dashboard) ══
+APP.dashCurvaSel = null; // curva clicada: 'A','B','C','D','E' ou null
+
+function renderCurvaChart(){
+  const hasCurva = Object.keys(APP.curvaABC).length > 0;
+  const empty = document.getElementById('curva-prod-empty');
+  const btns  = document.getElementById('curva-btns');
+  const panel = document.getElementById('curva-prod-panel');
+  if(!hasCurva){
+    if(empty) empty.style.display='block';
+    if(btns)  btns.innerHTML='';
+    if(panel) panel.style.display='none';
+    return;
+  }
+  if(empty) empty.style.display='none';
+
+  const d = dadosDashFinal();
+  // Count & value by curva using produtos
+  const byCurva={A:{qtd:0,val:0,roms:new Set()},B:{qtd:0,val:0,roms:new Set()},
+                  C:{qtd:0,val:0,roms:new Set()},D:{qtd:0,val:0,roms:new Set()},
+                  E:{qtd:0,val:0,roms:new Set()},'?':{qtd:0,val:0,roms:new Set()}};
+
+  // Use produtos filtered by same romaneios as d
+  const romSet = new Set(d.map(x=>x.romaneio));
+  const prodsD = APP.produtos.filter(p=>romSet.has(p.romaneio));
+  prodsD.forEach(p=>{
+    const cv=getCurva(p.cod_produto);
+    if(!byCurva[cv]) byCurva[cv]={qtd:0,val:0,roms:new Set()};
+    byCurva[cv].qtd+=p.quantidade;
+    byCurva[cv].roms.add(p.romaneio);
+  });
+  // Also add valor from romaneio data
+  d.forEach(x=>{
+    const cv=getCurvaRom(x);
+    if(byCurva[cv]) byCurva[cv].val+=x.valor||0;
+  });
+
+  const cvDef=[
+    {k:'A',label:'Curva A',bg:'var(--red-bg)',border:'var(--red-border)',color:'var(--red)',desc:'Mais relevantes'},
+    {k:'B',label:'Curva B',bg:'var(--amber-bg)',border:'var(--amber-border)',color:'var(--amber)',desc:'Relevância média'},
+    {k:'C',label:'Curva C',bg:'var(--green-bg)',border:'var(--green-border)',color:'var(--green)',desc:'Menor relevância'},
+    {k:'D',label:'Curva D',bg:'#f3e8ff',border:'#c4b5fd',color:'#8b5cf6',desc:'Baixo giro'},
+    {k:'E',label:'Curva E',bg:'var(--bg2)',border:'var(--border2)',color:'var(--text-dim)',desc:'Mínimo giro'},
+  ].filter(cv=>byCurva[cv.k]?.qtd>0);
+
+  const totalQtd = prodsD.reduce((a,b)=>a+b.quantidade,0)||1;
+
+  if(btns) btns.innerHTML = cvDef.map(cv=>{
+    const sel = APP.dashCurvaSel===cv.k;
+    const v=byCurva[cv.k];
+    const pct=(v.qtd/totalQtd*100).toFixed(1);
+    return `<div class="curva-card ${sel?'curva-card-sel':''}"
+      style="background:${sel?cv.bg:'var(--surface2)'};border:2px solid ${sel?cv.border:'var(--border)'};border-radius:10px;padding:10px 14px;cursor:pointer;min-width:110px;transition:all .2s"
+      onclick="window.clickCurvaCard('${cv.k}')">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+        <span class="curva-badge curva-${cv.k}">${cv.k}</span>
+        <span style="font-size:11px;font-weight:600;color:${sel?cv.color:'var(--text-mid)'}">${cv.label}</span>
+      </div>
+      <div style="font-family:var(--mono);font-size:18px;font-weight:700;color:${sel?cv.color:'var(--text)'}">${v.qtd.toLocaleString('pt-BR')}</div>
+      <div style="font-size:10px;color:${sel?cv.color:'var(--text-dim)'}">${pct}% · ${v.roms.size} rom.</div>
+      <div style="margin-top:6px;height:3px;background:var(--border);border-radius:2px;overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:${cv.color};transition:width .4s"></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  if(APP.dashCurvaSel) renderCurvaProdPanel(APP.dashCurvaSel, prodsD, byCurva);
+}
+window.renderCurvaChart = renderCurvaChart;
+
+function clickCurvaCard(curva){
+  APP.dashCurvaSel = APP.dashCurvaSel===curva ? null : curva;
+  renderCurvaChart();
+  const panel=document.getElementById('curva-prod-panel');
+  if(panel) panel.style.display = APP.dashCurvaSel ? 'block' : 'none';
+}
+window.clickCurvaCard = clickCurvaCard;
+
+function clearCurvaClick(){
+  APP.dashCurvaSel=null;
+  renderCurvaChart();
+  const panel=document.getElementById('curva-prod-panel');
+  if(panel) panel.style.display='none';
+}
+window.clearCurvaClick = clearCurvaClick;
+
+function renderCurvaProdPanel(curva, prodsD, byCurva){
+  const panel=document.getElementById('curva-prod-panel');
+  if(panel) panel.style.display='block';
+
+  const cvColors={A:'var(--red)',B:'var(--amber)',C:'var(--green)',D:'#8b5cf6',E:'var(--text-dim)'};
+  const cor = cvColors[curva]||'var(--amber)';
+
+  // Filter products of this curva
+  const prodsCv = prodsD.filter(p=>getCurva(p.cod_produto)===curva);
+
+  // Aggregate by product
+  const byProd={};
+  prodsCv.forEach(p=>{
+    const k=String(p.cod_produto);
+    if(!byProd[k]) byProd[k]={cod:k,desc:p.descricao,marca:p.marca_fornecedor||p.marca_produto||'',qtd:0,roms:new Set()};
+    byProd[k].qtd+=p.quantidade;
+    byProd[k].roms.add(p.romaneio);
+  });
+  const topProds=Object.values(byProd).sort((a,b)=>b.qtd-a.qtd).slice(0,15);
+  const maxQ=topProds[0]?.qtd||1;
+  const totalQtd=prodsCv.reduce((a,b)=>a+b.quantidade,0);
+  const totalRoms=new Set(prodsCv.map(p=>p.romaneio)).size;
+  const totalSKUs=Object.keys(byProd).length;
+
+  // KPIs
+  const kpis=document.getElementById('curva-prod-kpis');
+  if(kpis) kpis.innerHTML=[
+    {label:'Unidades',val:totalQtd.toLocaleString('pt-BR')},
+    {label:'Romaneios',val:totalRoms.toLocaleString('pt-BR')},
+    {label:'SKUs distintos',val:totalSKUs.toLocaleString('pt-BR')},
+  ].map(k=>`<div style="font-size:11px"><span style="color:var(--text-dim)">${k.label}: </span><strong style="color:${cor}">${k.val}</strong></div>`).join('');
+
+  // Ranking
+  const rank=document.getElementById('curva-prod-ranking');
+  if(rank) rank.innerHTML = topProds.length===0
+    ? '<div style="color:var(--text-dim);font-size:12px">Nenhum produto encontrado.</div>'
+    : topProds.map((p,i)=>`
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-family:var(--mono);font-size:10px;color:${cor};font-weight:700;width:18px;text-align:right">${i+1}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;font-weight:${i<3?'600':'400'};color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${p.desc}">${p.desc}</div>
+        <div style="height:4px;background:var(--bg2);border-radius:2px;margin-top:2px;overflow:hidden">
+          <div style="height:100%;background:${cor};border-radius:2px;width:${(p.qtd/maxQ*100).toFixed(1)}%;transition:width .4s"></div>
+        </div>
+      </div>
+      <span style="font-family:var(--mono);font-size:11px;font-weight:600;color:${cor};min-width:36px;text-align:right">${p.qtd}</span>
+      <span style="font-size:9px;color:var(--text-dim)">${p.roms.size}r</span>
+    </div>`).join('');
+
+  // Top marcas
+  const byMarca={};
+  prodsCv.forEach(p=>{const k=p.marca_fornecedor||p.marca_produto||'Sem marca';if(!byMarca[k])byMarca[k]=0;byMarca[k]+=p.quantidade;});
+  const topMarcas=Object.entries(byMarca).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  const maxM=topMarcas[0]?.[1]||1;
+  const marcasEl=document.getElementById('curva-prod-marcas');
+  if(marcasEl) marcasEl.innerHTML=topMarcas.map(([m,q])=>`
+    <div><div class="bar-header"><span class="bar-label">${m}</span><span class="bar-val" style="color:${cor}">${q.toLocaleString('pt-BR')}</span></div>
+    <div class="bar-track"><div class="bar-fill" style="width:${(q/maxM*100).toFixed(1)}%;background:${cor}"></div></div></div>
+  `).join('');
+}
+window.renderCurvaProdPanel = renderCurvaProdPanel;
+
 function renderDashDrillDown(d) {
   const el=document.getElementById('dash-drilldown');
   if(!el) return;
@@ -2752,7 +2901,7 @@ window.renderCvTable = renderCvTable;
 function goCvP(p){APP.cvPage=p;renderCvTable();}
 window.goCvP=goCvP;
 
-Object.assign(window,{showTab,filtrarMes,applyFilters,resetFilters,sortBy,setChip,toggleTheme,dashClick,dashClearSel,renderDashDrillDown,renderMarcasChart,filtrarMarcasChart,pushHistorico,updateUndoBtn,desfazerUltimo,revertEntry,abrirHistorico,fecharHistorico,renderHistoricoPanel,
+Object.assign(window,{showTab,filtrarMes,applyFilters,resetFilters,sortBy,setChip,toggleTheme,dashClick,dashClearSel,renderDashDrillDown,renderCurvaChart,clickCurvaCard,clearCurvaClick,renderCurvaProdPanel,renderMarcasChart,filtrarMarcasChart,pushHistorico,updateUndoBtn,desfazerUltimo,revertEntry,abrirHistorico,fecharHistorico,renderHistoricoPanel,
   marcarFiltrados,renderPicker,selMarca,copiarExtracao,handleXlsx,importarPaste,
   renderHistorico,remMes,excluirRegistro,exportarCSV,exportarExcel,exportarTXT,
   toggleExportDd,abrirNovoRomaneio,fecharNovoRomaneio,salvarNovoRomaneio,
@@ -3162,6 +3311,8 @@ td{padding:9px 13px;color:var(--text-mid);vertical-align:middle;white-space:nowr
 .curva-D{background:#f3e8ff;color:#8b5cf6;border:1px solid #c4b5fd}
 .curva-E{background:var(--bg2);color:var(--text-dim);border:1px solid var(--border2)}
 .curva-\?{background:var(--bg2);color:var(--text-dim);border:1px solid var(--border)}
+.curva-card:hover{transform:translateY(-1px);box-shadow:var(--shadow)}
+.curva-card-sel{transform:translateY(-2px)!important;box-shadow:var(--shadow-lg)!important}
 @media print{
 @media print{.topbar,.nav-tabs,.filters-bar,.pagination,.ext-actions,.marca-picker,.btn,#toast,#loading-overlay,.seed-banner{display:none!important}.extracao-wrap{grid-template-columns:1fr}.extracao-result{border:none}body{background:white;color:black}}
 </style>
@@ -3369,6 +3520,36 @@ document.addEventListener('DOMContentLoaded', function(){
         <div class="chart-card">
           <div class="chart-title">Status — clique para filtrar</div>
           <div class="bar-list" id="chart-status"></div>
+        </div>
+      </div>
+
+      <!-- CURVA × PRODUTOS -->
+      <div class="charts-row" style="margin-bottom:4px">
+        <div class="chart-card" style="grid-column:span 3">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px">
+            <div class="chart-title" style="margin-bottom:0">📊 Curva × Produtos — clique na curva para ver o ranking</div>
+            <div style="display:flex;gap:6px;align-items:center" id="curva-sel-tags"></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap" id="curva-btns"></div>
+          <div id="curva-prod-panel" style="display:none">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+              <div>
+                <div style="font-size:10px;font-weight:600;color:var(--text-dim);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px">Top 15 produtos</div>
+                <div id="curva-prod-ranking" style="display:flex;flex-direction:column;gap:5px"></div>
+              </div>
+              <div>
+                <div style="font-size:10px;font-weight:600;color:var(--text-dim);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px">Top marcas na curva selecionada</div>
+                <div class="bar-list" id="curva-prod-marcas"></div>
+              </div>
+            </div>
+            <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);display:flex;align-items:center;gap:16px">
+              <div id="curva-prod-kpis" style="display:flex;gap:12px;flex-wrap:wrap"></div>
+              <button class="btn btn-sm btn-outline" onclick="window.clearCurvaClick&&window.clearCurvaClick()" style="margin-left:auto;font-size:11px">✕ Limpar seleção</button>
+            </div>
+          </div>
+          <div id="curva-prod-empty" style="font-size:12px;color:var(--text-dim);padding:8px 0">
+            Curva ABC não importada — vá em Importar → Curva ABC para carregar os dados.
+          </div>
         </div>
       </div>
 
