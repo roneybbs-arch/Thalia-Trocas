@@ -2314,8 +2314,8 @@ function handleCurvaXlsx(evt){
       const cod=String(row[colCod]||'').trim();
       const curva=String(row[colCurva]||'').trim().toUpperCase();
       if(!cod){skip++;continue;}
-      if(!['A','B','C'].includes(curva)){skip++;continue;}
-      if(!votes[cod]) votes[cod]={A:0,B:0,C:0};
+      if(!['A','B','C','D','E'].includes(curva)){skip++;continue;}
+      if(!votes[cod]) votes[cod]={A:0,B:0,C:0,D:0,E:0};
       votes[cod][curva]++;
     }
 
@@ -2325,7 +2325,7 @@ function handleCurvaXlsx(evt){
     let ok=0, multi=0;
     Object.entries(votes).forEach(([cod,v])=>{
       const max=Math.max(v.A,v.B,v.C);
-      const winners=['A','B','C'].filter(c=>v[c]===max);
+      const winners=['A','B','C','D','E'].filter(c=>v[c]===max);
       novo[cod]=winners[0]; // tie-break already A>B>C
       if(winners.length>1) multi++;
       ok++;
@@ -2514,15 +2514,19 @@ function renderCurvaABC(){
   const qtdA = prodList.filter(p=>p.curva==='A').reduce((a,b)=>a+b.qtd,0);
   const qtdB = prodList.filter(p=>p.curva==='B').reduce((a,b)=>a+b.qtd,0);
   const qtdC = prodList.filter(p=>p.curva==='C').reduce((a,b)=>a+b.qtd,0);
+  const qtdD2 = prodList.filter(p=>p.curva==='D').reduce((a,b)=>a+b.qtd,0);
+  const qtdE2 = prodList.filter(p=>p.curva==='E').reduce((a,b)=>a+b.qtd,0);
   const qtdUnk = prodList.filter(p=>p.curva==='?').reduce((a,b)=>a+b.qtd,0);
   const anomalias = prodList.filter(p=>p.curva==='A').sort((a,b)=>b.qtd-a.qtd);
   const pctA = totalQtd>0?(qtdA/totalQtd*100).toFixed(1):0;
 
+  const qtdD = qtdD2;
+  const qtdE = qtdE2;
   document.getElementById('cv-kpi-grid').innerHTML=`
     <div class="kpi c-red"><div class="kpi-label">Curva A devolvida</div><div class="kpi-val">${qtdA.toLocaleString('pt-BR')}</div><div class="kpi-sub">${pctA}% do total · ${anomalias.length} SKUs</div></div>
     <div class="kpi c-amber"><div class="kpi-label">Curva B devolvida</div><div class="kpi-val">${qtdB.toLocaleString('pt-BR')}</div><div class="kpi-sub">${totalQtd>0?(qtdB/totalQtd*100).toFixed(1):0}% do total</div></div>
     <div class="kpi c-green"><div class="kpi-label">Curva C devolvida</div><div class="kpi-val">${qtdC.toLocaleString('pt-BR')}</div><div class="kpi-sub">${totalQtd>0?(qtdC/totalQtd*100).toFixed(1):0}% do total</div></div>
-    <div class="kpi c-blue"><div class="kpi-label">Total unidades</div><div class="kpi-val">${totalQtd.toLocaleString('pt-BR')}</div><div class="kpi-sub">${prodList.length} SKUs distintos</div></div>
+    <div class="kpi c-blue"><div class="kpi-label">Curva D+E devolvida</div><div class="kpi-val">${(qtdD+qtdE).toLocaleString('pt-BR')}</div><div class="kpi-sub">${totalQtd>0?((qtdD+qtdE)/totalQtd*100).toFixed(1):0}% do total</div></div>
     <div class="kpi c-purple"><div class="kpi-label">Produtos sem curva</div><div class="kpi-val">${qtdUnk.toLocaleString('pt-BR')}</div><div class="kpi-sub">não mapeados no ERP</div></div>
     <div class="kpi c-red"><div class="kpi-label">Anomalia crítica</div><div class="kpi-val" style="font-size:13px">${anomalias[0]?.desc?.substring(0,22)||'—'}</div><div class="kpi-sub">${anomalias[0]?anomalias[0].qtd+' un. Curva A':''}</div></div>
   `;
@@ -2552,7 +2556,7 @@ function renderCurvaABC(){
     }).join('');
 
   // PIE curva
-  const pieData = [{k:'A',v:qtdA,c:'#ef4444'},{k:'B',v:qtdB,c:'#f59e0b'},{k:'C',v:qtdC,c:'#10b981'},{k:'?',v:qtdUnk,c:'#94a3b8'}];
+  const pieData = [{k:'A',v:qtdA,c:'#ef4444'},{k:'B',v:qtdB,c:'#f59e0b'},{k:'C',v:qtdC,c:'#10b981'},{k:'D',v:qtdD,c:'#8b5cf6'},{k:'E',v:qtdE,c:'#64748b'},{k:'?',v:qtdUnk,c:'#cbd5e1'}];
   const pieT = totalQtd||1;
   let sa=-Math.PI/2, ps='';
   pieData.forEach(({k,v,c})=>{
@@ -2635,7 +2639,7 @@ function renderCvTable(){
   let rows=Object.values(byProd);
 
   if(sort==='qtd') rows.sort((a,b)=>b.qtd-a.qtd);
-  else if(sort==='curva'){const cO={'A':0,'B':1,'C':2,'?':3};rows.sort((a,b)=>cO[a.curva]-cO[b.curva]||b.qtd-a.qtd);}
+  else if(sort==='curva'){const cO={'A':0,'B':1,'C':2,'D':3,'E':4,'?':5};rows.sort((a,b)=>(cO[a.curva]??5)-(cO[b.curva]??5)||b.qtd-a.qtd);}
   else if(sort==='marca') rows.sort((a,b)=>a.marca.localeCompare(b.marca));
   else if(sort==='anomalia') rows.sort((a,b)=>{const s={A:0,'?':1,B:2,C:3};return s[a.curva]-s[b.curva]||b.qtd-a.qtd;});
 
@@ -3090,6 +3094,8 @@ td{padding:9px 13px;color:var(--text-mid);vertical-align:middle;white-space:nowr
 .curva-A{background:var(--red-bg);color:var(--red);border:1px solid var(--red-border)}
 .curva-B{background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border)}
 .curva-C{background:var(--green-bg);color:var(--green);border:1px solid var(--green-border)}
+.curva-D{background:#f3e8ff;color:#8b5cf6;border:1px solid #c4b5fd}
+.curva-E{background:var(--bg2);color:var(--text-dim);border:1px solid var(--border2)}
 .curva-\?{background:var(--bg2);color:var(--text-dim);border:1px solid var(--border)}
 @media print{
 @media print{.topbar,.nav-tabs,.filters-bar,.pagination,.ext-actions,.marca-picker,.btn,#toast,#loading-overlay,.seed-banner{display:none!important}.extracao-wrap{grid-template-columns:1fr}.extracao-result{border:none}body{background:white;color:black}}
@@ -3469,6 +3475,8 @@ document.addEventListener('DOMContentLoaded', function(){
               <option value="A">Curva A</option>
               <option value="B">Curva B</option>
               <option value="C">Curva C</option>
+              <option value="D">Curva D</option>
+              <option value="E">Curva E</option>
             </select>
           </div>
           <div class="fg"><div class="flbl">Marca</div>
@@ -3762,7 +3770,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
         <div class="import-card full" data-role="admin">
           <h2>📊 Importar Curva ABC do ERP</h2>
-          <p>Arraste o arquivo .xlsx com a curva ABC extraída do ERP. Colunas esperadas: <strong>CÓD. PRODUTO · CURVA</strong> ou <strong>CÓD. PRODUTO · LOJA · CURVA</strong> (valores: A, B ou C). A coluna de loja é opcional — se existir, a curva final de cada produto será a <strong>moda entre as lojas</strong> (a que aparece mais vezes).<br>
+          <p>Arraste o arquivo .xlsx com a curva ABC extraída do ERP. Colunas esperadas: <strong>CÓD. PRODUTO · CURVA</strong> ou <strong>CÓD. PRODUTO · LOJA · CURVA</strong> (valores: A, B ou C). A coluna de loja é opcional — se existir, a curva final de cada produto será a <strong>moda entre as lojas</strong>. Aceita curvas A, B, C, D e E (a que aparece mais vezes).<br>
           A curva é uma tabela de referência global — ao importar, a versão anterior é completamente substituída. Recomendado atualizar a cada 15 dias.</p>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
             <div class="fg">
