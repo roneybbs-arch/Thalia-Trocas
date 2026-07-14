@@ -65,6 +65,165 @@ window._APP = {
   seeded: false,
 };
 const APP = window._APP;
+APP.historico = []; // stack de alterações
+const MAX_HIST = 50;
+
+function pushHistorico(tipo, docId, campoLabel, valorAnterior, valorNovo, itemSnapshot){
+  const entry = {
+    id: Date.now() + Math.random(),
+    ts: new Date(),
+    tipo,       // 'status' | 'comprador' | 'edicao' | 'exclusao' | 'novo' | 'em_massa'
+    docId,
+    campoLabel, // descrição legível
+    valorAnterior,
+    valorNovo,
+    snap: itemSnapshot ? {...itemSnapshot} : null, // cópia do item antes da mudança
+  };
+  APP.historico.unshift(entry);
+  if(APP.historico.length > MAX_HIST) APP.historico.pop();
+  updateUndoBtn();
+}
+
+function updateUndoBtn(){
+  const btn = document.getElementById('undo-btn');
+  if(!btn) return;
+  const count = APP.historico.length;
+  btn.style.display = count > 0 ? 'flex' : 'none';
+  const countEl = document.getElementById('undo-count');
+  if(countEl) countEl.textContent = count > 0 ? `(${count})` : '';
+  btn.title = count > 0
+    ? `${count} ação(ões) — clique para ver histórico`
+    : 'Nenhuma ação para desfazer';
+}
+
+async function desfazerUltimo(){
+  if(!APP.historico.length) return;
+  const entry = APP.historico[0];
+  await revertEntry(entry);
+}
+window.desfazerUltimo = desfazerUltimo;
+
+async function revertEntry(entry){
+  if(!entry) return;
+  const btn = document.getElementById('undo-btn');
+  if(btn) btn.disabled = true;
+  try {
+    if(entry.tipo === 'exclusao'){
+      // Re-inserir o documento excluído
+      const ref = doc(collection(db, 'romaneios'));
+      const {_docId, ...data} = entry.snap;
+      await setDoc(ref, data);
+      APP.dados.push({...data, _docId: ref.id});
+      toast('↩ Exclusão revertida — registro restaurado','green');
+    } else if(entry.tipo === 'novo'){
+      // Excluir o documento que foi criado
+      if(entry.docId){
+        await deleteDoc(doc(db,'romaneios',entry.docId));
+        APP.dados = APP.dados.filter(d=>d._docId!==entry.docId);
+      }
+      toast('↩ Novo registro removido','green');
+    } else if(entry.tipo === 'em_massa'){
+      // Reverter múltiplos status
+      const items = entry.snap; // array [{docId, status}]
+      const BATCH = 400;
+      for(let i=0;i<items.length;i+=BATCH){
+        const batch = writeBatch(db);
+        items.slice(i,i+BATCH).forEach(({docId,status})=>{
+          const item = APP.dados.find(d=>d._docId===docId);
+          if(item){
+            item.status = status;
+            batch.update(doc(db,'romaneios',docId),{status});
+          }
+        });
+        await batch.commit();
+      }
+      toast(`↩ ${items.length} status revertidos`,'green');
+    } else {
+      // Reverter campo único (status, comprador, edicao)
+      const item = APP.dados.find(d=>d._docId===entry.docId);
+      if(item && entry.snap){
+        const fields = Object.keys(entry.snap).filter(k=>!['_docId','id'].includes(k));
+        const revertData = {};
+        fields.forEach(k => { revertData[k] = entry.snap[k]; });
+        await updateDoc(doc(db,'romaneios',entry.docId), revertData);
+        Object.assign(item, revertData);
+        toast('↩ Alteração revertida com sucesso','green');
+      }
+    }
+    // Remove esta entrada do histórico
+    APP.historico = APP.historico.filter(e=>e.id !== entry.id);
+    updateUndoBtn();
+    populateMesSelects(); initFilters();
+    APP.filtrados = [...dadosAtivos()];
+    applyFilters(); renderDashboard(); renderStatusStrip();
+    fecharHistorico();
+    abrirHistorico(); // re-render se painel aberto
+  } catch(e){
+    toast('❌ Erro ao reverter: '+e.message,'red');
+  } finally {
+    if(btn) btn.disabled = false;
+  }
+}
+window.revertEntry = revertEntry;
+
+function abrirHistorico(){
+  const panel = document.getElementById('hist-panel');
+  if(!panel) return;
+  const isOpen = panel.style.display !== 'none';
+  if(isOpen){ fecharHistorico(); return; }
+  panel.style.display = 'block';
+  renderHistoricoPanel();
+}
+window.abrirHistorico = abrirHistorico;
+
+function fecharHistorico(){
+  const panel = document.getElementById('hist-panel');
+  if(panel) panel.style.display = 'none';
+}
+window.fecharHistorico = fecharHistorico;
+
+function renderHistoricoPanel(){
+  const body = document.getElementById('hist-panel-body');
+  if(!body) return;
+  if(!APP.historico.length){
+    body.innerHTML = '<div class="hist-empty">Nenhuma alteração registrada nesta sessão.</div>';
+    return;
+  }
+  const stLbl={PENDENTE:'Pendente',EXTRAÍDO:'Extraído',NOTA_EMITIDA:'Nota Emitida',
+    AG_RETIRADA:'Ag. Retirada',RETIRADO:'Retirado',DESCARTE:'Descarte'};
+  const tipoIcon={status:'🔄',comprador:'👤',edicao:'✏️',exclusao:'🗑',novo:'➕',em_massa:'⚡'};
+  body.innerHTML = APP.historico.map((e,i)=>{
+    const d = e.ts;
+    const hora = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+    const marcaInfo = e.snap?.marca || '';
+    const lojaInfo = e.snap?.loja ? `Loja ${e.snap.loja}` : '';
+    const ctx = [marcaInfo, lojaInfo].filter(Boolean).join(' · ');
+    const antLabel = e.tipo==='status' ? (stLbl[e.valorAnterior]||e.valorAnterior) :
+                     e.tipo==='em_massa' ? `${e.snap?.length||0} itens` :
+                     e.valorAnterior||'—';
+    const novLabel = e.tipo==='status' ? (stLbl[e.valorNovo]||e.valorNovo) :
+                     e.tipo==='em_massa' ? e.valorNovo :
+                     e.valorNovo||'—';
+    return `<div class="hist-entry ${i===0?'hist-entry-first':''}">
+      <div class="hist-entry-icon">${tipoIcon[e.tipo]||'•'}</div>
+      <div class="hist-entry-info">
+        <div class="hist-entry-label">${e.campoLabel}</div>
+        ${ctx?`<div class="hist-entry-ctx">${ctx}</div>`:''}
+        <div class="hist-entry-diff">
+          <span class="hist-val-old">${antLabel}</span>
+          <span class="hist-arrow">→</span>
+          <span class="hist-val-new">${novLabel}</span>
+        </div>
+        <div class="hist-entry-time">${hora}</div>
+      </div>
+      <button class="btn btn-sm hist-revert-btn" onclick="window.revertEntry(APP.historico[${i}])" title="Reverter esta ação">
+        ↩ Reverter
+      </button>
+    </div>`;
+  }).join('');
+}
+window.renderHistoricoPanel = renderHistoricoPanel;
+
 
 // ══ UTILS ══
 const fmt  = v => 'R$ ' + v.toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,'.');
@@ -241,13 +400,15 @@ async function updStatus(docId, val, el) {
   const item = APP.dados.find(d => d._docId === docId);
   if(!item) return;
   const oldStatus = item.status;
+  const snap = {...item};
   item.status = val;
   el.className = `ss ss-${val}`;
-  const c={RETIRADO:'green',DESCARTE:'orange',NOTA_EMITIDA:'amber'};
+  const c={RETIRADO:'green',DESCARTE:'orange',NOTA_EMITIDA:'amber',AG_RETIRADA:'cyan'};
   toast(`✓ ${val}`, c[val]||'');
   renderStatusStrip(); renderDashboard();
   try {
     await updateDoc(doc(db, 'romaneios', docId), { status: val });
+    pushHistorico('status', docId, `Status: ${item.marca||''}`, oldStatus, val, snap);
   } catch(e) {
     item.status = oldStatus;
     el.className = `ss ss-${oldStatus}`;
@@ -261,10 +422,13 @@ async function updComp(docId, val) {
   const item = APP.dados.find(d => d._docId === docId);
   if(!item) return;
   const old = item.comprador;
+  const snap = {...item};
   item.comprador = val.toUpperCase().trim();
+  if(item.comprador === old) return; // sem mudança
   toast('✓ Comprador atualizado');
   try {
     await updateDoc(doc(db, 'romaneios', docId), { comprador: item.comprador });
+    pushHistorico('comprador', docId, `Comprador: ${item.marca||''}`, old||'—', item.comprador||'—', snap);
   } catch(e) {
     item.comprador = old;
     toast('❌ Erro ao salvar: ' + e.message, 'red');
@@ -276,6 +440,8 @@ async function marcarFiltrados(status) {
   if (APP.filtrados.length > 200) {
     if(!confirm(`Marcar ${APP.filtrados.length} itens como "${status}"?`)) return;
   }
+  // Snapshot for undo
+  const snapMassa = APP.filtrados.filter(d=>d._docId).map(d=>({docId:d._docId,status:d.status}));
   setLoading(true, `Atualizando ${APP.filtrados.length} registros...`);
   try {
     const BATCH_SIZE = 400;
@@ -289,7 +455,7 @@ async function marcarFiltrados(status) {
     }
     setLoading(false);
     renderTable(); renderStatusStrip(); renderDashboard();
-    const c={RETIRADO:'green',DESCARTE:'orange',NOTA_EMITIDA:'amber'};
+    const c={RETIRADO:'green',DESCARTE:'orange',NOTA_EMITIDA:'amber',AG_RETIRADA:'cyan'};
     toast(`✓ ${APP.filtrados.length} itens → ${status}`, c[status]||'');
   } catch(e) {
     setLoading(false);
@@ -537,6 +703,7 @@ function renderDashboard() {
   const marcas   = [...new Set(d.map(x=>x.marca?.trim()))].length;
   const pendente = d.filter(x=>x.status==='PENDENTE').length;
   const notaem   = d.filter(x=>x.status==='NOTA_EMITIDA').length;
+  const agRet    = d.filter(x=>x.status==='AG_RETIRADA').length;
   const retirado = d.filter(x=>x.status==='RETIRADO').length;
   const descarte = d.filter(x=>x.status==='DESCARTE').length;
   const valDesc  = d.filter(x=>x.status==='DESCARTE').reduce((a,b)=>a+b.valor,0);
@@ -551,6 +718,7 @@ function renderDashboard() {
     <div class="kpi c-green"><div class="kpi-label">Lojas</div><div class="kpi-val">${lojas}</div><div class="kpi-sub">envolvidas</div></div>
     <div class="kpi c-amber"><div class="kpi-label">Nota Emitida</div><div class="kpi-val">${notaem}</div><div class="kpi-sub">resolvidos</div></div>
     <div class="kpi c-green"><div class="kpi-label">Retirado</div><div class="kpi-val">${retirado}</div><div class="kpi-sub">concluídos</div></div>
+    <div class="kpi" style="border-top:2px solid var(--cyan)"><div class="kpi-label">Ag. Retirada</div><div class="kpi-val" style="color:var(--cyan)">${agRet}</div><div class="kpi-sub">aguardando</div></div>
     <div class="kpi c-red"><div class="kpi-label">Pendentes</div><div class="kpi-val">${pendente}</div><div class="kpi-sub">aguardando</div></div>
     <div class="kpi c-orange"><div class="kpi-label">Descarte</div><div class="kpi-val">${descarte}</div><div class="kpi-sub">${fmt(valDesc)}</div></div>
   `;
@@ -634,12 +802,12 @@ function renderDashboard() {
   // Status — CLICÁVEIS + REATIVOS
   // Status — usa d para barras reativas, dAll para contexto
   // dimmed só quando o próprio status está sendo filtrado por clique
-  const bySt={PENDENTE:0,EXTRAÍDO:0,NOTA_EMITIDA:0,RETIRADO:0,DESCARTE:0};
-  const byStD={PENDENTE:0,EXTRAÍDO:0,NOTA_EMITIDA:0,RETIRADO:0,DESCARTE:0};
+  const bySt={PENDENTE:0,EXTRAÍDO:0,NOTA_EMITIDA:0,AG_RETIRADA:0,RETIRADO:0,DESCARTE:0};
+  const byStD={PENDENTE:0,EXTRAÍDO:0,NOTA_EMITIDA:0,AG_RETIRADA:0,RETIRADO:0,DESCARTE:0};
   dAll.forEach(x=>{if(bySt[x.status]!==undefined)bySt[x.status]++;});
   d.forEach(x=>{if(byStD[x.status]!==undefined)byStD[x.status]++;});
-  const stC={PENDENTE:'#64748b',EXTRAÍDO:'#3b82f6',NOTA_EMITIDA:'#f59e0b',RETIRADO:'#10b981',DESCARTE:'#f97316'};
-  const stL={PENDENTE:'Pendente',EXTRAÍDO:'Extraído',NOTA_EMITIDA:'Nota Emitida',RETIRADO:'Retirado',DESCARTE:'Descarte'};
+  const stC={PENDENTE:'#64748b',EXTRAÍDO:'#3b82f6',NOTA_EMITIDA:'#f59e0b',AG_RETIRADA:'#0ea5e9',RETIRADO:'#10b981',DESCARTE:'#f97316'};
+  const stL={PENDENTE:'Pendente',EXTRAÍDO:'Extraído',NOTA_EMITIDA:'Nota Emitida',AG_RETIRADA:'Ag. Retirada',RETIRADO:'Retirado',DESCARTE:'Descarte'};
   const maxSt=Math.max(...Object.values(bySt))||1;
   const hasStSel=!!APP.dashSel.status; // só dim quando STATUS foi clicado
   document.getElementById('chart-status').innerHTML=Object.entries(bySt).map(([s,v])=>{
@@ -737,13 +905,14 @@ function initFilters() {
 
 function renderStatusStrip() {
   const d=dadosAtivos();
-  const counts={ALL:d.length,PENDENTE:0,EXTRAÍDO:0,NOTA_EMITIDA:0,RETIRADO:0,DESCARTE:0};
+  const counts={ALL:d.length,PENDENTE:0,EXTRAÍDO:0,NOTA_EMITIDA:0,AG_RETIRADA:0,RETIRADO:0,DESCARTE:0};
   d.forEach(x=>{if(counts[x.status]!==undefined)counts[x.status]++;});
   const cfg=[
     {key:'ALL',label:'Todos',color:''},
     {key:'PENDENTE',label:'Pendente',color:'#64748b'},
     {key:'EXTRAÍDO',label:'Extraído',color:'#3b82f6'},
     {key:'NOTA_EMITIDA',label:'Nota Emitida',color:'#f59e0b'},
+    {key:'AG_RETIRADA',label:'Ag. Retirada',color:'#0ea5e9'},
     {key:'RETIRADO',label:'Retirado',color:'#10b981'},
     {key:'DESCARTE',label:'Descarte',color:'#f97316'},
   ];
@@ -759,10 +928,10 @@ function setChip(k){
   // Sync dropdown checkboxes with chip
   APP.statusFiltros=k&&k!=='ALL'?[k]:[];
   document.getElementById('sd-ALL').checked=!k||k==='ALL';
-  ['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','RETIRADO','DESCARTE'].forEach(s=>{
+  ['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','AG_RETIRADA','RETIRADO','DESCARTE'].forEach(s=>{
     const el=document.getElementById('sd-'+s); if(el) el.checked=(s===k);
   });
-  const nomes={PENDENTE:'Pendente',EXTRAÍDO:'Extraído',NOTA_EMITIDA:'Nota Emitida',RETIRADO:'Retirado',DESCARTE:'Descarte'};
+  const nomes={PENDENTE:'Pendente',EXTRAÍDO:'Extraído',NOTA_EMITIDA:'Nota Emitida',AG_RETIRADA:'Ag. Retirada',RETIRADO:'Retirado',DESCARTE:'Descarte'};
   const lbl=document.getElementById('status-dd-label');
   if(lbl) lbl.textContent=k&&k!=='ALL'?nomes[k]:'Todos';
   applyFilters();
@@ -867,7 +1036,7 @@ function resetFilters(){
   });
   APP.chipFilter=''; APP.statusFiltros=[];
   document.getElementById('sd-ALL').checked=true;
-  ['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','RETIRADO','DESCARTE'].forEach(s=>{
+  ['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','AG_RETIRADA','RETIRADO','DESCARTE'].forEach(s=>{
     const el=document.getElementById('sd-'+s); if(el) el.checked=false;
   });
   const lbl=document.getElementById('status-dd-label'); if(lbl) lbl.textContent='Todos';
@@ -911,12 +1080,12 @@ function renderResumoFiltro(total){
   const valPct=valBase>0?(total/valBase*100):0;
 
   // Breakdown por status dentro do filtro atual
-  const bySt={PENDENTE:0,EXTRAÍDO:0,NOTA_EMITIDA:0,RETIRADO:0,DESCARTE:0};
-  const byStVal={PENDENTE:0,EXTRAÍDO:0,NOTA_EMITIDA:0,RETIRADO:0,DESCARTE:0};
+  const bySt={PENDENTE:0,EXTRAÍDO:0,NOTA_EMITIDA:0,AG_RETIRADA:0,RETIRADO:0,DESCARTE:0};
+  const byStVal={PENDENTE:0,EXTRAÍDO:0,NOTA_EMITIDA:0,AG_RETIRADA:0,RETIRADO:0,DESCARTE:0};
   d.forEach(x=>{ if(bySt[x.status]!==undefined){ bySt[x.status]++; byStVal[x.status]+=x.valor; }});
 
-  const stCor={PENDENTE:'var(--text-dim)',EXTRAÍDO:'var(--blue)',NOTA_EMITIDA:'var(--amber)',RETIRADO:'var(--green)',DESCARTE:'var(--orange)'};
-  const stLbl={PENDENTE:'Pendente',EXTRAÍDO:'Extraído',NOTA_EMITIDA:'Nota Emitida',RETIRADO:'Retirado',DESCARTE:'Descarte'};
+  const stCor={PENDENTE:'var(--text-dim)',EXTRAÍDO:'var(--blue)',NOTA_EMITIDA:'var(--amber)',AG_RETIRADA:'var(--cyan)',RETIRADO:'var(--green)',DESCARTE:'var(--orange)'};
+  const stLbl={PENDENTE:'Pendente',EXTRAÍDO:'Extraído',NOTA_EMITIDA:'Nota Emitida',AG_RETIRADA:'Ag. Retirada',RETIRADO:'Retirado',DESCARTE:'Descarte'};
 
   // Only show statuses that have items in the current filter
   const stEntries=Object.entries(bySt).filter(([,v])=>v>0);
@@ -972,8 +1141,8 @@ function renderTable(){
   const thDel=document.getElementById('th-del');
   if(thEdit) thEdit.style.display=canEdit?'table-cell':'none';
   if(thDel) thDel.style.display=isAdmin?'table-cell':'none';
-  const opts=['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','RETIRADO','DESCARTE'];
-  const oLbl={PENDENTE:'PENDENTE',EXTRAÍDO:'EXTRAÍDO',NOTA_EMITIDA:'NOTA EMITIDA',RETIRADO:'RETIRADO',DESCARTE:'DESCARTE'};
+  const opts=['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','AG_RETIRADA','RETIRADO','DESCARTE'];
+  const oLbl={PENDENTE:'PENDENTE',EXTRAÍDO:'EXTRAÍDO',NOTA_EMITIDA:'NOTA EMITIDA',AG_RETIRADA:'AG. RETIRADA',RETIRADO:'RETIRADO',DESCARTE:'DESCARTE'};
   document.getElementById('table-body').innerHTML=slice.map(d=>{
     const vc=d.valor>=500?'val-h':d.valor>=100?'val-m':'val-l';
     if(canEdit){
@@ -991,7 +1160,7 @@ function renderTable(){
         <td>${isAdmin?`<button class="del-btn" title="Excluir registro" onclick="excluirRegistro('${d._docId}')">✕</button>`:''}</td>
       </tr>`;
     } else {
-      const stC={PENDENTE:'#64748b',EXTRAÍDO:'#3b82f6',NOTA_EMITIDA:'#f59e0b',RETIRADO:'#10b981',DESCARTE:'#f97316'};
+      const stC={PENDENTE:'#64748b',EXTRAÍDO:'#3b82f6',NOTA_EMITIDA:'#f59e0b',AG_RETIRADA:'#0ea5e9',RETIRADO:'#10b981',DESCARTE:'#f97316'};
       return `<tr>
         <td class="td-mes">${d.mes||'-'}</td>
         <td class="td-loja">${d.loja}</td>
@@ -1046,7 +1215,7 @@ function selMarca(el,marca){
   document.getElementById('ext-title').textContent=`Extração: ${marca}`;
   const byMes={};
   rows.forEach(d=>{if(!byMes[d.mes])byMes[d.mes]=[];byMes[d.mes].push(d);});
-  const sCor={PENDENTE:'#64748b',EXTRAÍDO:'#3b82f6',NOTA_EMITIDA:'#f59e0b',RETIRADO:'#10b981',DESCARTE:'#f97316'};
+  const sCor={PENDENTE:'#64748b',EXTRAÍDO:'#3b82f6',NOTA_EMITIDA:'#f59e0b',AG_RETIRADA:'#0ea5e9',RETIRADO:'#10b981',DESCARTE:'#f97316'};
   let html=`<div class="print-area">`;
   const periodos=[...new Set(rows.map(d=>d.mes||''))].filter(Boolean).sort((a,b)=>mesOrder.indexOf(a)-mesOrder.indexOf(b)).join(' · ')||'-';
   const lojas=[...new Set(rows.map(d=>d.loja))].sort((a,b)=>+a-+b).join(', ');
@@ -1211,7 +1380,7 @@ document.addEventListener('click',function(e){
 function toggleStatusOpt(key){
   if(key==='ALL'){
     const all=document.getElementById('sd-ALL').checked;
-    ['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','RETIRADO','DESCARTE'].forEach(s=>{
+    ['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','AG_RETIRADA','RETIRADO','DESCARTE'].forEach(s=>{
       const el=document.getElementById('sd-'+s);
       if(el) el.checked=false;
     });
@@ -1223,11 +1392,11 @@ function toggleStatusOpt(key){
 }
 function applyStatusFilter(){
   const all=document.getElementById('sd-ALL').checked;
-  const selected=['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','RETIRADO','DESCARTE']
+  const selected=['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','AG_RETIRADA','RETIRADO','DESCARTE']
     .filter(s=>document.getElementById('sd-'+s)?.checked);
   if(all||selected.length===0){
     document.getElementById('sd-ALL').checked=true;
-    ['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','RETIRADO','DESCARTE'].forEach(s=>{
+    ['PENDENTE','EXTRAÍDO','NOTA_EMITIDA','AG_RETIRADA','RETIRADO','DESCARTE'].forEach(s=>{
       const el=document.getElementById('sd-'+s);if(el) el.checked=false;
     });
     APP.statusFiltros=[];
@@ -1316,6 +1485,7 @@ function fecharEdicao(){
 async function salvarEdicao(docId){
   const item=APP.dados.find(d=>d._docId===docId);
   if(!item) return;
+  const snapAntes={...item};
   const updates={
     mes: document.getElementById('em-mes').value,
     loja: document.getElementById('em-loja').value.trim(),
@@ -1333,6 +1503,7 @@ async function salvarEdicao(docId){
   if(btn){btn.disabled=true;btn.textContent='Salvando...';}
   try{
     await updateDoc(doc(db,'romaneios',docId), updates);
+    pushHistorico('edicao', docId, `Edição: ${snapAntes.marca||''}`, null, null, snapAntes);
     Object.assign(item, updates);
     fecharEdicao();
     populateMesSelects(); initFilters();
@@ -1352,15 +1523,17 @@ async function salvarEdicao(docId){
 }
 
 async function excluirRegistro(docId){
-  if(!confirm('Excluir este registro? Esta ação não pode ser desfeita.')) return;
+  if(!confirm('Excluir este registro? Você poderá desfazer logo em seguida se necessário.')) return;
   const item=APP.dados.find(d=>d._docId===docId);
   if(!item) return;
+  const snap={...item};
   try{
     await deleteDoc(doc(db,'romaneios',docId));
     APP.dados=APP.dados.filter(d=>d._docId!==docId);
     APP.filtrados=APP.filtrados.filter(d=>d._docId!==docId);
     renderTable(); renderStatusStrip(); renderDashboard();
-    toast('🗑 Registro excluído');
+    pushHistorico('exclusao', docId, `Excluído: ${snap.marca||''} Rom.${snap.romaneio||''}`, null, null, snap);
+    toast('🗑 Registro excluído — use ↩ para desfazer');
   }catch(e){toast('❌ Erro: '+e.message,'red');}
 }
 
@@ -1525,6 +1698,7 @@ function abrirNovoRomaneio(){
             <option value="PENDENTE">Pendente</option>
             <option value="EXTRAÍDO">Extraído</option>
             <option value="NOTA_EMITIDA">Nota Emitida</option>
+            <option value="AG_RETIRADA">Ag. Retirada</option>
             <option value="RETIRADO">Retirado</option>
             <option value="DESCARTE">Descarte</option>
           </select>
@@ -1913,7 +2087,7 @@ function renderProdTable(){
   const start=(APP.prodPage-1)*PROD_PER;
   const slice=rows.slice(start,start+PROD_PER);
 
-  const stCor={PENDENTE:'var(--text-dim)',EXTRAÍDO:'var(--blue)',NOTA_EMITIDA:'var(--amber)',RETIRADO:'var(--green)',DESCARTE:'var(--orange)'};
+  const stCor={PENDENTE:'var(--text-dim)',EXTRAÍDO:'var(--blue)',NOTA_EMITIDA:'var(--amber)',AG_RETIRADA:'var(--cyan)',RETIRADO:'var(--green)',DESCARTE:'var(--orange)'};
   const mC={VALIDADE:'bm-VALIDADE',DANIFICADO:'bm-DANIFICADO',ALTERADO:'bm-ALTERADO'};
 
   document.getElementById('prod-table-body').innerHTML=slice.map(p=>`
@@ -2075,7 +2249,400 @@ function renderMarcasChart(){
 window.renderMarcasChart = renderMarcasChart;
 window.filtrarMarcasChart = renderMarcasChart;
 
-Object.assign(window,{showTab,filtrarMes,applyFilters,resetFilters,sortBy,setChip,toggleTheme,dashClick,dashClearSel,renderDashDrillDown,renderMarcasChart,filtrarMarcasChart,
+// ══════════════════════════════════════════════════════════
+// CURVA ABC — dicionário de referência global
+// ══════════════════════════════════════════════════════════
+APP.curvaABC = {};       // { cod_produto: 'A'|'B'|'C' }
+APP.curvaImportadaEm = null;
+APP.curvaQtd = 0;
+APP.cvPage = 1;
+const CV_PER = 50;
+
+// Sub-tabs dentro da aba Produtos
+function showSubTab(tab){
+  ['produtos','curva'].forEach(t=>{
+    document.getElementById('subpanel-'+t).style.display = t===tab?'block':'none';
+    document.getElementById('subtab-'+t).classList.toggle('active', t===tab);
+  });
+  if(tab==='curva') renderCurvaABC();
+}
+window.showSubTab = showSubTab;
+
+// ── Import handler ──────────────────────────────────────────
+function handleCurvaXlsx(evt){
+  const file = evt.target.files[0]; if(!file) return;
+  const log = document.getElementById('curva-import-log');
+  if(log) log.innerHTML='<span style="color:var(--text-dim)">Lendo arquivo...</span>';
+
+  const isCsv = file.name.toLowerCase().endsWith('.csv');
+
+  function processRaw(raw){
+    let ok=0, skip=0;
+    const novo={};
+    // detect header
+    let start=0;
+    const h0=String(raw[0]?.[0]||'').toUpperCase();
+    if(isNaN(Number(h0))||h0.includes('COD')||h0.includes('PROD')) start=1;
+    for(let i=start;i<raw.length;i++){
+      const row=raw[i];
+      if(!row||row.every(c=>String(c||'').trim()==='')) continue;
+      const cod=String(row[0]||'').trim();
+      const curva=String(row[1]||'').trim().toUpperCase();
+      if(!cod){skip++;continue;}
+      if(!['A','B','C'].includes(curva)){skip++;continue;}
+      novo[cod]=curva; ok++;
+    }
+    APP.curvaABC=novo; APP.curvaQtd=ok; APP.curvaImportadaEm=new Date();
+    const dataRef=document.getElementById('curva-data-ref')?.value||'';
+    const badge=document.getElementById('curva-status-badge');
+    if(badge) badge.innerHTML=`<span style="color:var(--green);font-weight:600">✅ ${ok.toLocaleString('pt-BR')} produtos com curva</span>${dataRef?' · ref: '+dataRef:''}`;
+    if(log) log.innerHTML=`<span class="log-ok">✅ ${ok.toLocaleString('pt-BR')} produtos importados (A/B/C)</span>`
+      +(skip>0?`
+<span class="log-warn">⚠ ${skip} linhas ignoradas (curva inválida ou cod vazio)</span>`:'');
+    toast('✅ Curva ABC atualizada — '+ok.toLocaleString('pt-BR')+' produtos','green');
+    if(document.getElementById('subpanel-curva')?.style.display!=='none') renderCurvaABC();
+  }
+
+  if(isCsv){
+    // CSV: read as text, detect separator, split into rows/cols
+    const reader=new FileReader();
+    reader.onload=e=>{
+      try{
+        const text=e.target.result;
+        const lines=text.split('\n');
+        // detect separator: ; or , or tab
+        const firstLine=lines[0]||'';
+        const sep=firstLine.includes(';')?';':firstLine.includes('	')?'	':',';
+        const raw=lines.map(l=>l.split(sep).map(c=>c.replace(/^["']|["']$/g,'').trim()));
+        processRaw(raw);
+      }catch(err){
+        if(log) log.innerHTML=`<span class="log-err">❌ Erro: ${err.message}</span>`;
+      }
+    };
+    reader.readAsText(file, 'UTF-8');
+  } else {
+    // XLSX
+    const reader=new FileReader();
+    reader.onload=e=>{
+      try{
+        const wb=XLSX.read(e.target.result,{type:'array'});
+        const raw=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:''});
+        processRaw(raw);
+      }catch(err){
+        if(log) log.innerHTML=`<span class="log-err">❌ Erro: ${err.message}</span>`;
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+}
+window.handleCurvaXlsx = handleCurvaXlsx;
+
+// Drag drop curva
+document.addEventListener('DOMContentLoaded',function(){
+  const dz=document.getElementById('curva-drop-zone');
+  if(dz){
+    dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});
+    dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));
+    dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');
+      const f=e.dataTransfer.files[0];if(f)handleCurvaXlsx({target:{files:[f]}});});
+  }
+});
+
+// ── Helper: get curva of a product ─────────────────────────
+function getCurva(cod){
+  if(!cod) return '?';
+  return APP.curvaABC[String(cod)] || '?';
+}
+
+// ── Filters ─────────────────────────────────────────────────
+function updateCvPeriodLabel(){
+  const de=document.getElementById('cv-periodo-de')?.value||'';
+  const ate=document.getElementById('cv-periodo-ate')?.value||'';
+  const lbl=document.getElementById('cv-period-label');
+  if(!lbl) return;
+  if(!de&&!ate){ lbl.textContent='Período'; lbl.style.color='var(--text-dim)'; return; }
+  lbl.textContent = de&&ate&&de===ate?de:de&&ate?de+'→'+ate:de||ate;
+  lbl.style.color='var(--amber)';
+}
+window.updateCvPeriodLabel = updateCvPeriodLabel;
+
+function toggleCvPeriodDd(){
+  const p=document.getElementById('cv-period-panel');
+  if(!p) return;
+  const open=p.style.display!=='none';
+  p.style.display=open?'none':'block';
+  if(!open) initCvPeriodSelects();
+}
+window.toggleCvPeriodDd = toggleCvPeriodDd;
+
+function initCvPeriodSelects(){
+  const meses=getMeses();
+  ['cv-periodo-de','cv-periodo-ate'].forEach(id=>{
+    const el=document.getElementById(id);if(!el)return;
+    const cur=el.value; while(el.options.length>1)el.remove(1);
+    meses.forEach(m=>{const o=new Option(m,m);if(m===cur)o.selected=true;el.add(o);});
+  });
+  const grid=document.getElementById('cv-presets-grid');
+  if(grid){
+    const presets=[];
+    if(meses.length>=1) presets.push({label:'Último mês',de:meses[meses.length-1],ate:meses[meses.length-1]});
+    if(meses.length>=3) presets.push({label:'Últ. 3 meses',de:meses[meses.length-3],ate:meses[meses.length-1]});
+    presets.push({label:'Tudo',de:'',ate:''});
+    const anos=[...new Set(meses.map(m=>m.split('/')[1]))].sort();
+    anos.forEach(ano=>{
+      const doAno=meses.filter(m=>m.endsWith('/'+ano));
+      if(doAno.length>0) presets.push({label:'Ano '+ano,de:doAno[0],ate:doAno[doAno.length-1]});
+    });
+    grid.innerHTML=presets.map(p=>`<button class="period-preset-btn" onclick="document.getElementById('cv-periodo-de').value='${p.de}';document.getElementById('cv-periodo-ate').value='${p.ate}';window.updateCvPeriodLabel();window.renderCurvaABC()">${p.label}</button>`).join('');
+  }
+}
+
+function resetCvFilters(){
+  ['cv-periodo-de','cv-periodo-ate','cv-curva','cv-marca','cv-motivo','cv-busca'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.value='';
+  });
+  updateCvPeriodLabel(); renderCurvaABC();
+}
+window.resetCvFilters = resetCvFilters;
+
+document.addEventListener('click',function(e){
+  const btn=document.getElementById('cv-period-btn');
+  const panel=document.getElementById('cv-period-panel');
+  if(btn&&panel&&!btn.contains(e.target)&&!panel.contains(e.target)) panel.style.display='none';
+});
+
+// ── Core data: aggregate products with curva ────────────────
+function dadosCurvaFiltrados(){
+  const de=document.getElementById('cv-periodo-de')?.value||'';
+  const ate=document.getElementById('cv-periodo-ate')?.value||'';
+  const filtCurva=document.getElementById('cv-curva')?.value||'';
+  const filtMarca=document.getElementById('cv-marca')?.value||'';
+  const filtMotivo=document.getElementById('cv-motivo')?.value||'';
+  const filtBusca=(document.getElementById('cv-busca')?.value||'').toLowerCase();
+
+  // Filter produtos and join with curva
+  return APP.produtos.filter(p=>{
+    if(de||ate){ if(!mesInRange(p.mes,de,ate)) return false; }
+    if(filtMarca&&p.marca_fornecedor!==filtMarca) return false;
+    if(filtMotivo&&p.motivo!==filtMotivo) return false;
+    const curva=getCurva(p.cod_produto);
+    if(filtCurva&&curva!==filtCurva) return false;
+    if(filtBusca&&!p.descricao?.toLowerCase().includes(filtBusca)) return false;
+    return true;
+  });
+}
+
+// ── Main render ─────────────────────────────────────────────
+function renderCurvaABC(){
+  initCvPeriodSelects();
+  // Init marca filter
+  const marcas=[...new Set(APP.produtos.map(p=>p.marca_fornecedor||''))].filter(Boolean).sort();
+  const sm=document.getElementById('cv-marca');
+  if(sm){ const cur=sm.value; while(sm.options.length>1)sm.remove(1); marcas.forEach(m=>{const o=new Option(m,m);if(m===cur)o.selected=true;sm.add(o);}); }
+
+  // Show banner if no curva loaded
+  const hasCurva = Object.keys(APP.curvaABC).length > 0;
+  const banner = document.getElementById('cv-banner');
+  if(banner) banner.style.display = hasCurva?'none':'block';
+  if(!hasCurva){
+    document.getElementById('cv-kpi-grid').innerHTML='';
+    document.getElementById('cv-anomalias').innerHTML='<div style="padding:16px;color:var(--text-dim);font-size:12px">Importe a Curva ABC para ver os dashboards de cruzamento.</div>';
+    return;
+  }
+
+  const prods = dadosCurvaFiltrados();
+
+  // Aggregate by product
+  const byProd = {};
+  prods.forEach(p=>{
+    const k = String(p.cod_produto);
+    if(!byProd[k]) byProd[k]={
+      cod:k, desc:p.descricao, marca:p.marca_fornecedor||p.marca_produto||'',
+      curva:getCurva(k), qtd:0, roms:new Set(), meses:new Set(),
+      motivos:{VALIDADE:0,DANIFICADO:0,ALTERADO:0}
+    };
+    byProd[k].qtd += p.quantidade;
+    byProd[k].roms.add(p.romaneio);
+    byProd[k].meses.add(p.mes);
+    if(byProd[k].motivos[p.motivo]!==undefined) byProd[k].motivos[p.motivo]++;
+  });
+  const prodList = Object.values(byProd);
+
+  // KPIs
+  const totalQtd = prods.reduce((a,b)=>a+b.quantidade,0);
+  const qtdA = prodList.filter(p=>p.curva==='A').reduce((a,b)=>a+b.qtd,0);
+  const qtdB = prodList.filter(p=>p.curva==='B').reduce((a,b)=>a+b.qtd,0);
+  const qtdC = prodList.filter(p=>p.curva==='C').reduce((a,b)=>a+b.qtd,0);
+  const qtdUnk = prodList.filter(p=>p.curva==='?').reduce((a,b)=>a+b.qtd,0);
+  const anomalias = prodList.filter(p=>p.curva==='A').sort((a,b)=>b.qtd-a.qtd);
+  const pctA = totalQtd>0?(qtdA/totalQtd*100).toFixed(1):0;
+
+  document.getElementById('cv-kpi-grid').innerHTML=`
+    <div class="kpi c-red"><div class="kpi-label">Curva A devolvida</div><div class="kpi-val">${qtdA.toLocaleString('pt-BR')}</div><div class="kpi-sub">${pctA}% do total · ${anomalias.length} SKUs</div></div>
+    <div class="kpi c-amber"><div class="kpi-label">Curva B devolvida</div><div class="kpi-val">${qtdB.toLocaleString('pt-BR')}</div><div class="kpi-sub">${totalQtd>0?(qtdB/totalQtd*100).toFixed(1):0}% do total</div></div>
+    <div class="kpi c-green"><div class="kpi-label">Curva C devolvida</div><div class="kpi-val">${qtdC.toLocaleString('pt-BR')}</div><div class="kpi-sub">${totalQtd>0?(qtdC/totalQtd*100).toFixed(1):0}% do total</div></div>
+    <div class="kpi c-blue"><div class="kpi-label">Total unidades</div><div class="kpi-val">${totalQtd.toLocaleString('pt-BR')}</div><div class="kpi-sub">${prodList.length} SKUs distintos</div></div>
+    <div class="kpi c-purple"><div class="kpi-label">Produtos sem curva</div><div class="kpi-val">${qtdUnk.toLocaleString('pt-BR')}</div><div class="kpi-sub">não mapeados no ERP</div></div>
+    <div class="kpi c-red"><div class="kpi-label">Anomalia crítica</div><div class="kpi-val" style="font-size:13px">${anomalias[0]?.desc?.substring(0,22)||'—'}</div><div class="kpi-sub">${anomalias[0]?anomalias[0].qtd+' un. Curva A':''}</div></div>
+  `;
+
+  // ANOMALIAS — top curva A
+  const top20A = anomalias.slice(0,20);
+  const maxA = top20A[0]?.qtd||1;
+  document.getElementById('cv-anomalia-count').textContent = anomalias.length+' produtos curva A';
+  document.getElementById('cv-anomalias').innerHTML = top20A.length===0
+    ? '<div style="padding:16px;color:var(--text-dim);font-size:12px">Nenhum produto Curva A encontrado no filtro atual.</div>'
+    : top20A.map((p,i)=>{
+      const motivoPrinc = Object.entries(p.motivos).sort((a,b)=>b[1]-a[1])[0][0];
+      return `<div style="display:flex;align-items:center;gap:10px">
+        <span style="font-family:var(--mono);font-size:10px;color:var(--red);font-weight:700;width:18px;text-align:right">${i+1}</span>
+        <span class="curva-badge curva-A">A</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.desc}</div>
+          <div style="height:4px;background:var(--bg2);border-radius:2px;margin-top:3px;overflow:hidden">
+            <div style="height:100%;background:var(--red);border-radius:2px;width:${(p.qtd/maxA*100).toFixed(1)}%;transition:width .5s"></div>
+          </div>
+        </div>
+        <span style="font-size:10px;color:var(--text-dim)">${p.marca?.substring(0,12)}</span>
+        <span style="font-family:var(--mono);font-size:11px;font-weight:700;color:var(--red);min-width:36px;text-align:right">${p.qtd}</span>
+        <span class="bm bm-${motivoPrinc}" style="font-size:9px">${motivoPrinc}</span>
+        <span style="font-size:10px;color:var(--text-dim)">${p.roms.size} rom.</span>
+      </div>`;
+    }).join('');
+
+  // PIE curva
+  const pieData = [{k:'A',v:qtdA,c:'#ef4444'},{k:'B',v:qtdB,c:'#f59e0b'},{k:'C',v:qtdC,c:'#10b981'},{k:'?',v:qtdUnk,c:'#94a3b8'}];
+  const pieT = totalQtd||1;
+  let sa=-Math.PI/2, ps='';
+  pieData.forEach(({k,v,c})=>{
+    const a=(v/pieT)*2*Math.PI;
+    const x1=50+40*Math.cos(sa),y1=50+40*Math.sin(sa);
+    const x2=50+40*Math.cos(sa+a),y2=50+40*Math.sin(sa+a);
+    ps+=`<path d="M50,50 L${x1.toFixed(1)},${y1.toFixed(1)} A40,40 0 ${a>Math.PI?1:0},1 ${x2.toFixed(1)},${y2.toFixed(1)} Z" fill="${c}" opacity=".9" style="cursor:pointer" onclick="document.getElementById('cv-curva').value='${k==='?'?'':k}';window.renderCurvaABC()"/>`;
+    sa+=a;
+  });
+  document.getElementById('cv-pie').innerHTML=ps+'<circle cx="50" cy="50" r="16" fill="var(--surface)"/>';
+  document.getElementById('cv-pie-legend').innerHTML=pieData.map(({k,v,c})=>`
+    <div class="legend-item" style="cursor:pointer" onclick="document.getElementById('cv-curva').value='${k==='?'?'':k}';window.renderCurvaABC()">
+      <div class="legend-dot" style="background:${c}"></div>
+      Curva ${k}
+      <span class="legend-pct">${(v/pieT*100).toFixed(1)}%</span>
+    </div>`).join('');
+
+  // TOP MARCAS com curva A
+  const byMarcaA={};
+  prods.filter(p=>getCurva(p.cod_produto)==='A').forEach(p=>{
+    const k=p.marca_fornecedor||p.marca_produto||'Sem marca';
+    if(!byMarcaA[k])byMarcaA[k]=0; byMarcaA[k]+=p.quantidade;
+  });
+  const topMA=Object.entries(byMarcaA).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const maxMA=topMA[0]?.[1]||1;
+  document.getElementById('cv-marcas-a').innerHTML=topMA.map(([m,q])=>`
+    <div><div class="bar-header"><span class="bar-label">${m}</span><span class="bar-val" style="color:var(--red)">${q.toLocaleString('pt-BR')} un.</span></div>
+    <div class="bar-track"><div class="bar-fill" style="width:${(q/maxMA*100).toFixed(1)}%;background:var(--red)"></div></div></div>
+  `).join('');
+
+  // PROPORÇÃO A por marca (% de tudo que a marca devolveu que é curva A)
+  const byMarcaTot={}, byMarcaAp={};
+  prods.forEach(p=>{
+    const k=p.marca_fornecedor||p.marca_produto||'Sem marca';
+    if(!byMarcaTot[k])byMarcaTot[k]=0; byMarcaTot[k]+=p.quantidade;
+    if(getCurva(p.cod_produto)==='A'){ if(!byMarcaAp[k])byMarcaAp[k]=0; byMarcaAp[k]+=p.quantidade; }
+  });
+  const propA=Object.entries(byMarcaTot)
+    .filter(([m])=>byMarcaAp[m]>0)
+    .map(([m,tot])=>({m,pct:Math.round((byMarcaAp[m]||0)/tot*100)}))
+    .sort((a,b)=>b.pct-a.pct).slice(0,8);
+  document.getElementById('cv-prop-a').innerHTML=propA.map(({m,pct})=>`
+    <div><div class="bar-header"><span class="bar-label">${m}</span><span class="bar-val" style="color:${pct>50?'var(--red)':'var(--amber)'}">${pct}% curva A</span></div>
+    <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${pct>50?'var(--red)':'var(--amber)'}"></div></div></div>
+  `).join('');
+
+  // EVOLUÇÃO MENSAL curva A
+  const meses=getMeses();
+  const byMesA={};
+  prods.filter(p=>getCurva(p.cod_produto)==='A').forEach(p=>{
+    if(!byMesA[p.mes])byMesA[p.mes]=0; byMesA[p.mes]+=p.quantidade;
+  });
+  const maxMesA=Math.max(...meses.map(m=>byMesA[m]||0))||1;
+  document.getElementById('cv-evolucao').innerHTML=meses.map(m=>{
+    const v=byMesA[m]||0; const h=Math.max(2,Math.round(v/maxMesA*70));
+    return `<div class="month-col" title="${m}: ${v} un. Curva A">
+      <div class="month-bar-wrap"><div class="month-bar" style="height:${h}px;background:var(--red);opacity:.85"></div></div>
+      <div class="month-lbl">${m.split('/')[0]}</div>
+      <div class="month-val">${v>0?v.toLocaleString('pt-BR'):''}</div>
+    </div>`;
+  }).join('');
+
+  // TABLE
+  renderCvTable();
+}
+window.renderCurvaABC = renderCurvaABC;
+
+function renderCvTable(){
+  const sort=document.getElementById('cv-table-sort')?.value||'qtd';
+  const prods = dadosCurvaFiltrados();
+
+  // Aggregate
+  const byProd={};
+  prods.forEach(p=>{
+    const k=String(p.cod_produto);
+    if(!byProd[k])byProd[k]={cod:k,desc:p.descricao,marca:p.marca_fornecedor||p.marca_produto||'',curva:getCurva(k),qtd:0,roms:new Set(),meses:new Set(),motivos:{VALIDADE:0,DANIFICADO:0,ALTERADO:0}};
+    byProd[k].qtd+=p.quantidade; byProd[k].roms.add(p.romaneio); byProd[k].meses.add(p.mes);
+    if(byProd[k].motivos[p.motivo]!==undefined) byProd[k].motivos[p.motivo]++;
+  });
+  let rows=Object.values(byProd);
+
+  if(sort==='qtd') rows.sort((a,b)=>b.qtd-a.qtd);
+  else if(sort==='curva'){const cO={'A':0,'B':1,'C':2,'?':3};rows.sort((a,b)=>cO[a.curva]-cO[b.curva]||b.qtd-a.qtd);}
+  else if(sort==='marca') rows.sort((a,b)=>a.marca.localeCompare(b.marca));
+  else if(sort==='anomalia') rows.sort((a,b)=>{const s={A:0,'?':1,B:2,C:3};return s[a.curva]-s[b.curva]||b.qtd-a.qtd;});
+
+  document.getElementById('cv-table-info').innerHTML=`<strong>${rows.length.toLocaleString('pt-BR')}</strong> produtos · <strong>${prods.reduce((a,b)=>a+b.quantidade,0).toLocaleString('pt-BR')}</strong> unidades`;
+
+  const start=(APP.cvPage-1)*CV_PER;
+  const slice=rows.slice(start,start+CV_PER);
+  const cvColor={A:'var(--red)',B:'var(--amber)',C:'var(--green)','?':'var(--text-dim)'};
+
+  document.getElementById('cv-table-body').innerHTML=slice.map(p=>{
+    const motivoPrinc=Object.entries(p.motivos).sort((a,b)=>b[1]-a[1])[0][0];
+    const alerta = p.curva==='A'&&p.qtd>=10
+      ? `<span style="font-size:10px;color:var(--red);font-weight:600">🚨 crítico</span>`
+      : p.curva==='A'&&p.qtd>=3
+      ? `<span style="font-size:10px;color:var(--orange)">⚠ atenção</span>`
+      : '';
+    return `<tr>
+      <td><span class="curva-badge curva-${p.curva}">${p.curva}</span></td>
+      <td class="td-marca" title="${p.desc}" style="max-width:220px">${p.desc}</td>
+      <td style="font-size:11px;color:var(--text-mid)">${p.marca}</td>
+      <td style="font-family:var(--mono);font-weight:700;color:${cvColor[p.curva]}">${p.qtd.toLocaleString('pt-BR')}</td>
+      <td class="td-rom">${p.roms.size}</td>
+      <td class="td-rom">${p.meses.size} mês(es)</td>
+      <td><span class="bm bm-${motivoPrinc}">${motivoPrinc}</span></td>
+      <td>${alerta}</td>
+    </tr>`;
+  }).join('');
+
+  // Pagination
+  const nPages=Math.ceil(rows.length/CV_PER);
+  const pag=document.getElementById('cv-pagination');
+  if(!pag) return;
+  if(nPages<=1){pag.innerHTML='';return;}
+  let html=`<button class="pb" onclick="window.goCvP(${APP.cvPage-1})" ${APP.cvPage===1?'disabled':''}>‹</button>`;
+  for(let i=1;i<=nPages;i++){
+    if(i===1||i===nPages||Math.abs(i-APP.cvPage)<=2)
+      html+=`<button class="pb ${i===APP.cvPage?'active':''}" onclick="window.goCvP(${i})">${i}</button>`;
+    else if(Math.abs(i-APP.cvPage)===3) html+='<span style="color:var(--text-dim);padding:0 3px">…</span>';
+  }
+  html+=`<button class="pb" onclick="window.goCvP(${APP.cvPage+1})" ${APP.cvPage===nPages?'disabled':''}>›</button>`;
+  pag.innerHTML=html;
+}
+window.renderCvTable = renderCvTable;
+
+function goCvP(p){APP.cvPage=p;renderCvTable();}
+window.goCvP=goCvP;
+
+Object.assign(window,{showTab,filtrarMes,applyFilters,resetFilters,sortBy,setChip,toggleTheme,dashClick,dashClearSel,renderDashDrillDown,renderMarcasChart,filtrarMarcasChart,pushHistorico,updateUndoBtn,desfazerUltimo,revertEntry,abrirHistorico,fecharHistorico,renderHistoricoPanel,
   marcarFiltrados,renderPicker,selMarca,copiarExtracao,handleXlsx,importarPaste,
   renderHistorico,remMes,excluirRegistro,exportarCSV,exportarExcel,exportarTXT,
   toggleExportDd,abrirNovoRomaneio,fecharNovoRomaneio,salvarNovoRomaneio,
@@ -2086,6 +2653,9 @@ Object.assign(window,{showTab,filtrarMes,applyFilters,resetFilters,sortBy,setChi
 <style>
 /* ══ CSS VARIABLES — LIGHT (default) ══ */
 :root,[data-theme="light"]{
+  --cyan:#0ea5e9;
+  --cyan-bg:#e0f2fe;
+  --cyan-border:#7dd3fc;
   --bg:#f4f6fb;
   --bg2:#eef0f7;
   --surface:#ffffff;
@@ -2122,6 +2692,9 @@ Object.assign(window,{showTab,filtrarMes,applyFilters,resetFilters,sortBy,setChi
 }
 /* ══ DARK MODE ══ */
 [data-theme="dark"]{
+  --cyan:#38bdf8;
+  --cyan-bg:rgba(14,165,233,.13);
+  --cyan-border:#075985;
   --bg:#0d0f16;
   --bg2:#12151f;
   --surface:#161a26;
@@ -2319,6 +2892,7 @@ td{padding:9px 13px;color:var(--text-mid);vertical-align:middle;white-space:nowr
 .ss-NOTA_EMITIDA{color:var(--amber);border-color:var(--amber-border);background:var(--amber-bg)}
 .ss-RETIRADO{color:var(--green);border-color:var(--green-border);background:var(--green-bg)}
 .ss-DESCARTE{color:var(--orange);border-color:var(--orange-border);background:var(--orange-bg)}
+.ss-AG_RETIRADA{color:var(--cyan);border-color:var(--cyan-border);background:var(--cyan-bg)}
 .ci{font-size:11px;background:transparent;border:1.5px solid transparent;color:var(--text-mid);border-radius:5px;padding:3px 6px;width:82px;text-transform:uppercase;font-family:var(--sans)}
 .ci:focus{border-color:var(--border2);background:var(--bg2);outline:none}.ci:hover{border-color:var(--border)}
 .edit-btn{font-size:13px;background:transparent;border:1.5px solid transparent;color:var(--text-dim);border-radius:5px;padding:2px 7px;cursor:pointer;transition:all .15s}
@@ -2403,6 +2977,7 @@ td{padding:9px 13px;color:var(--text-mid);vertical-align:middle;white-space:nowr
 #toast.amber{border-color:var(--amber-border)}
 #toast.orange{border-color:var(--orange-border)}
 #toast.red{border-color:var(--red-border)}
+#toast.cyan{border-color:var(--cyan-border)}
 
 ::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-track{background:transparent}
@@ -2449,6 +3024,32 @@ td{padding:9px 13px;color:var(--text-mid);vertical-align:middle;white-space:nowr
 #chart-marcas::-webkit-scrollbar{width:4px}
 #chart-marcas::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
 #chart-marcas::-webkit-scrollbar-track{background:transparent}
+.undo-btn{color:var(--amber)!important;border-color:var(--amber-border)!important;background:var(--amber-bg)!important;font-weight:600;animation:undoPulse 2s ease-in-out 1}
+@keyframes undoPulse{0%,100%{box-shadow:none}50%{box-shadow:0 0 0 3px var(--amber-bg)}}
+.hist-entry{display:flex;align-items:flex-start;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);transition:background .1s}
+.hist-entry:hover{background:var(--surface2)}
+.hist-entry-first{background:var(--amber-bg)}
+.hist-entry-icon{font-size:16px;flex-shrink:0;margin-top:1px}
+.hist-entry-info{flex:1;min-width:0}
+.hist-entry-label{font-size:12px;font-weight:600;color:var(--text);margin-bottom:2px}
+.hist-entry-ctx{font-size:10px;color:var(--text-dim);margin-bottom:3px}
+.hist-entry-diff{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px}
+.hist-val-old{font-size:11px;color:var(--red);background:var(--red-bg);border:1px solid var(--red-border);padding:1px 6px;border-radius:4px;text-decoration:line-through;font-family:var(--mono)}
+.hist-arrow{font-size:12px;color:var(--text-dim)}
+.hist-val-new{font-size:11px;color:var(--green);background:var(--green-bg);border:1px solid var(--green-border);padding:1px 6px;border-radius:4px;font-family:var(--mono)}
+.hist-entry-time{font-family:var(--mono);font-size:10px;color:var(--text-dim)}
+.hist-revert-btn{color:var(--amber)!important;border-color:var(--amber-border)!important;background:var(--amber-bg)!important;white-space:nowrap;flex-shrink:0;font-size:11px!important}
+.hist-revert-btn:hover{opacity:.8}
+.hist-empty{padding:24px;text-align:center;color:var(--text-dim);font-size:12px}
+.sub-tabs{display:flex;gap:0;margin-bottom:18px;border-bottom:2px solid var(--border)}
+.sub-tab{font-size:13px;font-weight:500;padding:9px 18px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--text-dim);transition:all .15s}
+.sub-tab:hover{color:var(--text-mid)}
+.sub-tab.active{color:var(--amber);border-bottom-color:var(--amber);font-weight:600}
+.curva-badge{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;font-family:var(--mono);font-size:11px;font-weight:700;flex-shrink:0}
+.curva-A{background:var(--red-bg);color:var(--red);border:1px solid var(--red-border)}
+.curva-B{background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border)}
+.curva-C{background:var(--green-bg);color:var(--green);border:1px solid var(--green-border)}
+.curva-\?{background:var(--bg2);color:var(--text-dim);border:1px solid var(--border)}
 @media print{
 @media print{.topbar,.nav-tabs,.filters-bar,.pagination,.ext-actions,.marca-picker,.btn,#toast,#loading-overlay,.seed-banner{display:none!important}.extracao-wrap{grid-template-columns:1fr}.extracao-result{border:none}body{background:white;color:black}}
 </style>
@@ -2603,6 +3204,8 @@ document.addEventListener('DOMContentLoaded', function(){
             <option value="PENDENTE">Pendente</option>
             <option value="EXTRAÍDO">Extraído</option>
             <option value="NOTA_EMITIDA">Nota Emitida</option>
+            <option value="AG_RETIRADA">Ag. Retirada</option>
+            <option value="AG_RETIRADA">Ag. Retirada</option>
             <option value="RETIRADO">Retirado</option>
             <option value="DESCARTE">Descarte</option>
           </select>
@@ -2665,6 +3268,15 @@ document.addEventListener('DOMContentLoaded', function(){
     <!-- PRODUTOS -->
     <div class="section" id="section-produtos">
 
+      <!-- SUB-TABS: Produtos / Curva ABC -->
+      <div class="sub-tabs">
+        <div class="sub-tab active" id="subtab-produtos" onclick="window.showSubTab('produtos')">📦 Produtos</div>
+        <div class="sub-tab" id="subtab-curva" onclick="window.showSubTab('curva')">📊 Curva ABC</div>
+      </div>
+
+      <!-- ── PAINEL PRODUTOS ── -->
+      <div id="subpanel-produtos">
+
       <!-- FILTROS PRODUTOS -->
       <div class="dash-filters-bar" id="prod-filters-bar">
         <div class="fg" style="position:relative">
@@ -2706,7 +3318,7 @@ document.addEventListener('DOMContentLoaded', function(){
         <div class="fg"><div class="flbl">Status</div>
           <select id="pp-status" onchange="window.applyProdFilters&&window.applyProdFilters()">
             <option value="">Todos</option><option value="PENDENTE">Pendente</option>
-            <option value="NOTA_EMITIDA">Nota Emitida</option><option value="RETIRADO">Retirado</option>
+            <option value="NOTA_EMITIDA">Nota Emitida</option><option value="AG_RETIRADA">Ag. Retirada</option><option value="RETIRADO">Retirado</option>
             <option value="DESCARTE">Descarte</option>
           </select>
         </div>
@@ -2775,6 +3387,134 @@ document.addEventListener('DOMContentLoaded', function(){
         <div class="pagination" id="prod-pagination"></div>
       </div>
 
+      </div><!-- /subpanel-produtos -->
+
+      <!-- ── PAINEL CURVA ABC ── -->
+      <div id="subpanel-curva" style="display:none">
+
+        <!-- FILTROS CURVA -->
+        <div class="dash-filters-bar">
+          <div class="fg" style="position:relative">
+            <div class="flbl">Período</div>
+            <div id="cv-period-btn" class="period-btn" onclick="window.toggleCvPeriodDd&&window.toggleCvPeriodDd()">
+              <span style="font-size:14px">📅</span>
+              <span id="cv-period-label" style="flex:1">Período</span>
+              <span style="font-size:10px;opacity:.5">▾</span>
+            </div>
+            <div id="cv-period-panel" class="period-panel" style="display:none">
+              <div class="period-panel-inner">
+                <div class="period-row">
+                  <div class="period-col"><div class="period-col-label">De</div>
+                    <select id="cv-periodo-de" class="period-select" onchange="window.updateCvPeriodLabel&&window.updateCvPeriodLabel();window.renderCurvaABC&&window.renderCurvaABC()"><option value="">Início</option></select>
+                  </div>
+                  <div class="period-arrow">→</div>
+                  <div class="period-col"><div class="period-col-label">Até</div>
+                    <select id="cv-periodo-ate" class="period-select" onchange="window.updateCvPeriodLabel&&window.updateCvPeriodLabel();window.renderCurvaABC&&window.renderCurvaABC()"><option value="">Fim</option></select>
+                  </div>
+                </div>
+                <div class="period-presets"><div class="period-preset-label">Atalhos</div>
+                  <div class="period-presets-grid" id="cv-presets-grid"></div>
+                </div>
+                <div class="period-actions">
+                  <button class="btn btn-sm btn-outline" onclick="document.getElementById('cv-periodo-de').value='';document.getElementById('cv-periodo-ate').value='';window.updateCvPeriodLabel&&window.updateCvPeriodLabel();window.renderCurvaABC&&window.renderCurvaABC()">✕ Limpar</button>
+                  <button class="btn btn-sm btn-amber" onclick="window.toggleCvPeriodDd&&window.toggleCvPeriodDd()">Aplicar</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="fg"><div class="flbl">Curva</div>
+            <select id="cv-curva" onchange="window.renderCurvaABC&&window.renderCurvaABC()">
+              <option value="">Todas (A+B+C)</option>
+              <option value="A">Curva A</option>
+              <option value="B">Curva B</option>
+              <option value="C">Curva C</option>
+            </select>
+          </div>
+          <div class="fg"><div class="flbl">Marca</div>
+            <select id="cv-marca" onchange="window.renderCurvaABC&&window.renderCurvaABC()" style="min-width:150px"><option value="">Todas</option></select>
+          </div>
+          <div class="fg"><div class="flbl">Motivo</div>
+            <select id="cv-motivo" onchange="window.renderCurvaABC&&window.renderCurvaABC()">
+              <option value="">Todos</option><option value="VALIDADE">Validade</option>
+              <option value="DANIFICADO">Danificado</option><option value="ALTERADO">Alterado</option>
+            </select>
+          </div>
+          <div class="fg"><div class="flbl">Busca produto</div>
+            <input type="text" id="cv-busca" placeholder="Nome do produto..." oninput="window.renderCurvaABC&&window.renderCurvaABC()" style="min-width:170px">
+          </div>
+          <div class="fg"><button class="btn btn-outline" onclick="window.resetCvFilters&&window.resetCvFilters()">✕ Limpar</button></div>
+        </div>
+
+        <!-- BANNER se curva não carregada -->
+        <div id="cv-banner" style="display:none">
+          <div class="seed-banner" style="display:flex">
+            <p>⚠️ <strong>Curva ABC não importada ainda.</strong> Vá em <strong>Importar → Curva ABC</strong> e carregue o arquivo do ERP.</p>
+            <button class="btn btn-amber" onclick="window.showTab&&window.showTab('importar')">➕ Importar Curva</button>
+          </div>
+        </div>
+
+        <!-- KPIs CURVA -->
+        <div class="kpi-grid" id="cv-kpi-grid" style="margin-bottom:20px"></div>
+
+        <!-- CHARTS ROW 1: Anomalias + Distribuição -->
+        <div class="charts-row" style="margin-bottom:20px">
+          <div class="chart-card" style="grid-column:span 2">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div class="chart-title" style="margin-bottom:0">⚠️ Produtos Curva A com mais devoluções — anomalias críticas</div>
+              <span id="cv-anomalia-count" style="font-family:var(--mono);font-size:10px;color:var(--text-dim);background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:2px 8px"></span>
+            </div>
+            <div id="cv-anomalias" style="display:flex;flex-direction:column;gap:6px"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">Distribuição por curva (unidades)</div>
+            <div class="pie-wrap">
+              <svg width="90" height="90" viewBox="0 0 100 100" id="cv-pie"></svg>
+              <div class="pie-legend" id="cv-pie-legend"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CHARTS ROW 2: Marca x Curva + Curva x Motivo + Evolução -->
+        <div class="charts-row" style="margin-bottom:20px">
+          <div class="chart-card">
+            <div class="chart-title">📦 Top marcas — unidades Curva A devolvidas</div>
+            <div class="bar-list" id="cv-marcas-a"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">⚖️ Proporção curva A por marca (%)</div>
+            <div class="bar-list" id="cv-prop-a"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">📅 Evolução Curva A mês a mês</div>
+            <div class="month-bars" id="cv-evolucao"></div>
+          </div>
+        </div>
+
+        <!-- TABELA DRILL-DOWN -->
+        <div class="table-wrap">
+          <div class="table-hdr">
+            <div class="table-info" id="cv-table-info"></div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <select id="cv-table-sort" onchange="window.renderCvTable&&window.renderCvTable()" style="font-size:12px">
+                <option value="qtd">↓ Maior qtd</option>
+                <option value="curva">Por curva (A→C)</option>
+                <option value="marca">Por marca</option>
+                <option value="anomalia">Anomalias primeiro</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table><thead><tr>
+              <th>Curva</th><th>Produto</th><th>Marca Fornec.</th>
+              <th>Qtd Dev.</th><th>Romaneios</th><th>Meses ativos</th><th>Motivo princ.</th><th>Alerta</th>
+            </tr></thead>
+            <tbody id="cv-table-body"></tbody></table>
+          </div>
+          <div class="pagination" id="cv-pagination"></div>
+        </div>
+
+      </div><!-- /subpanel-curva -->
+
     </div>
     <!-- /PRODUTOS -->
 
@@ -2836,6 +3576,7 @@ document.addEventListener('DOMContentLoaded', function(){
             <label class="sd-item" onclick="toggleStatusOpt('PENDENTE')"><input type="checkbox" id="sd-PENDENTE" onchange="applyStatusFilter()"><span style="color:#64748b">● Pendente</span></label>
             <label class="sd-item" onclick="toggleStatusOpt('EXTRAÍDO')"><input type="checkbox" id="sd-EXTRAÍDO" onchange="applyStatusFilter()"><span style="color:#3b82f6">● Extraído</span></label>
             <label class="sd-item" onclick="toggleStatusOpt('NOTA_EMITIDA')"><input type="checkbox" id="sd-NOTA_EMITIDA" onchange="applyStatusFilter()"><span style="color:#f59e0b">● Nota Emitida</span></label>
+            <label class="sd-item" onclick="toggleStatusOpt('AG_RETIRADA')"><input type="checkbox" id="sd-AG_RETIRADA" onchange="applyStatusFilter()"><span style="color:#0ea5e9">● Ag. Retirada</span></label>
             <label class="sd-item" onclick="toggleStatusOpt('RETIRADO')"><input type="checkbox" id="sd-RETIRADO" onchange="applyStatusFilter()"><span style="color:#10b981">● Retirado</span></label>
             <label class="sd-item" onclick="toggleStatusOpt('DESCARTE')"><input type="checkbox" id="sd-DESCARTE" onchange="applyStatusFilter()"><span style="color:#f97316">● Descarte</span></label>
           </div>
@@ -2862,6 +3603,7 @@ document.addEventListener('DOMContentLoaded', function(){
             <div style="display:flex;gap:6px;flex-wrap:wrap" data-role="admin,editor">
               <button class="btn btn-sm btn-blue" onclick="marcarFiltrados('EXTRAÍDO')">📤 Extraído</button>
               <button class="btn btn-sm btn-green" onclick="marcarFiltrados('NOTA_EMITIDA')">✓ Nota Emitida</button>
+              <button class="btn btn-sm btn-outline" style="color:var(--cyan);border-color:var(--cyan)" onclick="marcarFiltrados('AG_RETIRADA')">🕐 Ag. Retirada</button>
               <button class="btn btn-sm btn-outline" style="color:var(--green);border-color:var(--green)" onclick="marcarFiltrados('RETIRADO')">✅ Retirado</button>
               <button class="btn btn-sm btn-outline" style="color:var(--orange);border-color:var(--orange)" onclick="marcarFiltrados('DESCARTE')">🗑 Descarte</button>
             </div>
@@ -2975,6 +3717,30 @@ document.addEventListener('DOMContentLoaded', function(){
             <div class="drop-sub">SAIDA_ESTOQUE · EMPRESA · PRODUTO · DESCRICAO · QUANTIDADE · MARCA</div>
           </div>
           <div class="import-log" id="prod-import-log">Aguardando arquivo de produtos...</div>
+        </div>
+
+        <div class="import-card full" data-role="admin">
+          <h2>📊 Importar Curva ABC do ERP</h2>
+          <p>Arraste o arquivo .xlsx com a curva ABC extraída do ERP. Colunas esperadas: <strong>CÓD. PRODUTO · CURVA</strong> (valores: A, B ou C).<br>
+          A curva é uma tabela de referência global — ao importar, a versão anterior é completamente substituída. Recomendado atualizar a cada 15 dias.</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+            <div class="fg">
+              <div class="flbl">Data de referência</div>
+              <input type="text" id="curva-data-ref" placeholder="Ex: 01/06/2026" style="width:100%">
+            </div>
+            <div style="display:flex;align-items:flex-end">
+              <div id="curva-status-badge" style="font-size:11px;color:var(--text-dim);padding:6px 0">
+                Nenhuma curva importada ainda
+              </div>
+            </div>
+          </div>
+          <div class="drop-zone" id="curva-drop-zone">
+            <input type="file" accept=".xlsx,.xls,.csv" onchange="window.handleCurvaXlsx&&window.handleCurvaXlsx(event)">
+            <div class="drop-icon">📊</div>
+            <div class="drop-title">Arraste o .xlsx da Curva ABC aqui ou clique para selecionar</div>
+            <div class="drop-sub">Aceita .xlsx ou .csv · Colunas: CÓD. PRODUTO · CURVA (A / B / C)</div>
+          </div>
+          <div class="import-log" id="curva-import-log">Aguardando arquivo de curva ABC...</div>
         </div>
 
         <div class="import-card full">
