@@ -4066,7 +4066,7 @@ document.addEventListener('DOMContentLoaded', function(){
           <div class="status-dd-btn" id="curva-dd-btn" onclick="window.toggleCurvaDd&&window.toggleCurvaDd()">
             <span id="curva-dd-label">Todas</span><span style="font-size:10px;opacity:.5;margin-left:4px">▾</span>
           </div>
-          <div class="status-dd" id="curva-dd" style="display:none;min-width:140px">
+          <div class="status-dd" id="curva-dd" style="display:none;position:absolute;top:100%;right:0;z-index:300;background:var(--surface);border:1.5px solid var(--border2);border-radius:var(--radius);padding:6px 0;min-width:150px;box-shadow:var(--shadow-lg);margin-top:4px">
             <label class="sd-item" onclick="window.toggleCurvaOpt('ALL')">
               <input type="checkbox" id="cd-ALL" checked onchange="window.applyCurvaFilter()">
               <span>Todas</span>
