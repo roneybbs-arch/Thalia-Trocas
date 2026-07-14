@@ -659,6 +659,9 @@ window.dashClick=dashClick;
 
 function dashClearSel(){
   APP.dashSel={marca:null,loja:null,mes:null,motivo:null,status:null,curva:null};
+  APP.dashCurvaSel=null;
+  const cvPanel=document.getElementById('curva-prod-panel');
+  if(cvPanel) cvPanel.style.display='none';
   renderDashboard();
 }
 window.dashClearSel=dashClearSel;
@@ -879,6 +882,9 @@ function renderCurvaChart(){
     if(byCurva[cv]) byCurva[cv].val+=x.valor||0;
   });
 
+  // Sync APP.dashCurvaSel with APP.dashSel.curva
+  APP.dashCurvaSel = APP.dashSel.curva;
+
   const cvDef=[
     {k:'A',label:'Curva A',bg:'var(--red-bg)',border:'var(--red-border)',color:'var(--red)',desc:'Mais relevantes'},
     {k:'B',label:'Curva B',bg:'var(--amber-bg)',border:'var(--amber-border)',color:'var(--amber)',desc:'Relevância média'},
@@ -890,7 +896,7 @@ function renderCurvaChart(){
   const totalQtd = prodsD.reduce((a,b)=>a+b.quantidade,0)||1;
 
   if(btns) btns.innerHTML = cvDef.map(cv=>{
-    const sel = APP.dashCurvaSel===cv.k;
+    const sel = APP.dashSel.curva===cv.k;
     const v=byCurva[cv.k];
     const pct=(v.qtd/totalQtd*100).toFixed(1);
     return `<div class="curva-card ${sel?'curva-card-sel':''}"
@@ -908,23 +914,26 @@ function renderCurvaChart(){
     </div>`;
   }).join('');
 
-  if(APP.dashCurvaSel) renderCurvaProdPanel(APP.dashCurvaSel, prodsD, byCurva);
+  const selCv = APP.dashSel.curva;
+  const cvPanel = document.getElementById('curva-prod-panel');
+  if(cvPanel) cvPanel.style.display = selCv ? 'block' : 'none';
+  if(selCv) renderCurvaProdPanel(selCv, prodsD, byCurva);
 }
 window.renderCurvaChart = renderCurvaChart;
 
 function clickCurvaCard(curva){
-  APP.dashCurvaSel = APP.dashCurvaSel===curva ? null : curva;
-  renderCurvaChart();
-  const panel=document.getElementById('curva-prod-panel');
-  if(panel) panel.style.display = APP.dashCurvaSel ? 'block' : 'none';
+  // Unify with dashSel so all charts and drilldown react
+  const cur = APP.dashSel.curva;
+  APP.dashSel.curva = cur===curva ? null : curva;
+  APP.dashCurvaSel = APP.dashSel.curva; // keep in sync
+  renderDashboard(); // re-render everything
 }
 window.clickCurvaCard = clickCurvaCard;
 
 function clearCurvaClick(){
-  APP.dashCurvaSel=null;
-  renderCurvaChart();
-  const panel=document.getElementById('curva-prod-panel');
-  if(panel) panel.style.display='none';
+  APP.dashSel.curva = null;
+  APP.dashCurvaSel = null;
+  renderDashboard();
 }
 window.clearCurvaClick = clearCurvaClick;
 
@@ -1214,21 +1223,42 @@ function applyFilters(){
   const loja=document.getElementById('f-loja').value;
   const motivo=document.getElementById('f-motivo').value;
   const comp=document.getElementById('f-comp').value;
-  const mes=document.getElementById('f-mes').value; // filtro mês exato (legado)
+  const filtCurva=document.getElementById('f-curva')?.value||'';
+  const mes=document.getElementById('f-mes').value;
   const periDe=document.getElementById('f-periodo-de')?.value||'';
   const periAte=document.getElementById('f-periodo-ate')?.value||'';
   const statusFiltros=APP.statusFiltros||[];
+
+  // Pre-build romaneio→curva map if curva filter active (fast lookup)
+  let romCurvaMap=null;
+  if(filtCurva&&APP.produtos.length>0){
+    romCurvaMap={};
+    APP.produtos.forEach(p=>{
+      const rom=p.romaneio;
+      const cv=getCurva(p.cod_produto);
+      // Keep best (most critical) curva per romaneio
+      const order={'A':0,'B':1,'C':2,'D':3,'E':4,'?':5};
+      if(romCurvaMap[rom]===undefined||(order[cv]??5)<(order[romCurvaMap[rom]]??5)){
+        romCurvaMap[rom]=cv;
+      }
+    });
+  }
+
   APP.filtrados=dadosAtivos().filter(d=>{
     if(busca&&!d.marca?.toLowerCase().includes(busca)&&!d.romaneio?.includes(busca)) return false;
     if(loja&&d.loja!==loja) return false;
     if(motivo&&d.motivo!==motivo) return false;
     if(statusFiltros.length>0&&!statusFiltros.includes(d.status)) return false;
     if(comp&&d.comprador!==comp) return false;
-    // Filtro de período — se preenchido, sobrepõe o filtro de mês simples
     if(periDe||periAte){
       if(!mesInRange(d.mes, periDe, periAte)) return false;
     } else if(mes&&d.mes!==mes){
       return false;
+    }
+    // Filtro de curva: romaneio deve ter ao menos um produto da curva selecionada
+    if(filtCurva&&romCurvaMap){
+      const cv=romCurvaMap[d.romaneio]||'?';
+      if(filtCurva==='?'?cv!=='?':cv!==filtCurva) return false;
     }
     return true;
   });
@@ -1236,7 +1266,7 @@ function applyFilters(){
 }
 
 function resetFilters(){
-  ['f-busca','f-loja','f-motivo','f-comp','f-mes','f-periodo-de','f-periodo-ate'].forEach(id=>{
+  ['f-busca','f-loja','f-motivo','f-comp','f-curva','f-mes','f-periodo-de','f-periodo-ate'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.value='';
   });
   APP.chipFilter=''; APP.statusFiltros=[];
@@ -1834,6 +1864,7 @@ function exportarTXT(){
   const motivo=document.getElementById('f-motivo')?.value; if(motivo) infos.push('Motivo: '+motivo);
   const sf=APP.statusFiltros||[]; if(sf.length) infos.push('Status: '+sf.join(', '));
   const comp=document.getElementById('f-comp')?.value; if(comp) infos.push('Comprador: '+comp);
+  const cvExp=document.getElementById('f-curva')?.value; if(cvExp) infos.push('Curva: '+cvExp);
   const busca=document.getElementById('f-busca')?.value; if(busca) infos.push('Busca: "'+busca+'"');
   if(infos.length) txt+='Filtros: '+infos.join(' | ')+'\n';
   txt+=`Registros: ${d.length} | Total: R$ ${d.reduce((a,b)=>a+(b.valor||0),0).toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,'.')}\n`;
@@ -3966,6 +3997,17 @@ document.addEventListener('DOMContentLoaded', function(){
           </div>
         </div>
         <div class="fg"><div class="flbl">Comprador</div><select id="f-comp" onchange="window.applyFilters&&window.applyFilters()"><option value="">Todos</option></select></div>
+        <div class="fg"><div class="flbl">Curva</div>
+          <select id="f-curva" onchange="window.applyFilters&&window.applyFilters()">
+            <option value="">Todas</option>
+            <option value="A">Curva A 🚨</option>
+            <option value="B">Curva B</option>
+            <option value="C">Curva C</option>
+            <option value="D">Curva D</option>
+            <option value="E">Curva E</option>
+            <option value="?">Sem curva</option>
+          </select>
+        </div>
         <div class="fg"><button class="btn btn-outline" onclick="window.resetFilters&&window.resetFilters()">✕ Limpar</button></div>
       </div>
       <div id="resumo-filtro" class="resumo-filtro" style="display:none"></div>
