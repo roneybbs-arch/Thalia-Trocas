@@ -1229,21 +1229,28 @@ function applyFilters(){
   const periAte=document.getElementById('f-periodo-ate')?.value||'';
   const statusFiltros=APP.statusFiltros||[];
 
-  // Pre-build romaneio→Set(curvas) map — romaneio passes if it has ANY product of the selected curva
+  // Pre-build romaneio→Set(curvas) map
   let romCurvaSet=null;
-  if(filtCurva.length>0&&APP.produtos.length>0){
-    romCurvaSet={};
-    APP.produtos.forEach(p=>{
-      const rom=p.romaneio;
-      const cv=getCurva(p.cod_produto);
-      if(!romCurvaSet[rom]) romCurvaSet[rom]=new Set();
-      if(['A','B','C','D','E'].includes(cv)) romCurvaSet[rom].add(cv);
-      // Only add '?' if product truly has no mapping
-      else romCurvaSet[rom].add('?');
-    });
-  } else if(filtCurva.length>0){
-    // produtos not loaded — can't filter by curva
-    romCurvaSet={};
+  if(filtCurva.length>0){
+    if(APP.produtos.length===0){
+      // Produtos not loaded yet — trigger load and re-apply after
+      loadProdutosSilent().then(()=>applyFilters());
+    }
+    if(APP.produtos.length>0&&Object.keys(APP.curvaABC).length>0){
+      romCurvaSet={};
+      APP.produtos.forEach(p=>{
+        const rom=p.romaneio;
+        const cv=getCurva(p.cod_produto);
+        if(!romCurvaSet[rom]) romCurvaSet[rom]=new Set();
+        if(['A','B','C','D','E'].includes(cv)) romCurvaSet[rom].add(cv);
+        else romCurvaSet[rom].add('?');
+      });
+    } else {
+      // produtos loaded but curvaABC empty — warn user
+      if(APP.produtos.length>0&&Object.keys(APP.curvaABC).length===0){
+        toast('⚠ Importe a Curva ABC para usar este filtro','orange');
+      }
+    }
   }
 
   APP.filtrados=dadosAtivos().filter(d=>{
@@ -2078,6 +2085,7 @@ async function loadProdutos(){
 
 // Carrega produtos silenciosamente em segundo plano (sem spinner, sem toast)
 async function loadProdutosSilent(){
+  if(APP.produtos.length>0) return Promise.resolve();
   if(APP.produtos.length > 0) return;
   try{
     const resp = await fetch('produtos.json');
