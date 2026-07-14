@@ -2607,9 +2607,10 @@ function handleCurvaXlsx(evt){
     const novo={};
     let ok=0, multi=0;
     Object.entries(votes).forEach(([cod,v])=>{
-      const max=Math.max(v.A,v.B,v.C);
-      const winners=['A','B','C','D','E'].filter(c=>v[c]===max);
-      novo[cod]=winners[0]; // tie-break already A>B>C
+      const max=Math.max(v.A,v.B,v.C,v.D,v.E);
+      const winners=['A','B','C','D','E'].filter(c=>v[c]===max&&v[c]>0);
+      if(winners.length===0){skip++;return;} // all zero = skip
+      novo[cod]=winners[0]; // tie-break A>B>C>D>E
       if(winners.length>1) multi++;
       ok++;
     });
