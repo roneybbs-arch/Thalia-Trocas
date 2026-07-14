@@ -1229,27 +1229,32 @@ function applyFilters(){
   const periAte=document.getElementById('f-periodo-ate')?.value||'';
   const statusFiltros=APP.statusFiltros||[];
 
-  // Pre-build romaneio→Set(curvas) map
+  // Build romaneio→curvas Set using produtos + curvaABC
   let romCurvaSet=null;
   if(filtCurva.length>0){
-    if(APP.produtos.length===0){
-      // Produtos not loaded yet — trigger load and re-apply after
-      loadProdutosSilent().then(()=>applyFilters());
-    }
-    if(APP.produtos.length>0&&Object.keys(APP.curvaABC).length>0){
+    if(Object.keys(APP.curvaABC).length===0){
+      toast('⚠ Importe a Curva ABC (aba Importar) para usar este filtro','orange');
+    } else if(APP.produtos.length>0){
+      // Build from produtos list
       romCurvaSet={};
       APP.produtos.forEach(p=>{
-        const rom=p.romaneio;
-        const cv=getCurva(p.cod_produto);
+        const rom=String(p.romaneio);
+        const cv=APP.curvaABC[String(p.cod_produto)];
         if(!romCurvaSet[rom]) romCurvaSet[rom]=new Set();
-        if(['A','B','C','D','E'].includes(cv)) romCurvaSet[rom].add(cv);
+        if(cv&&['A','B','C','D','E'].includes(cv)) romCurvaSet[rom].add(cv);
         else romCurvaSet[rom].add('?');
       });
     } else {
-      // produtos loaded but curvaABC empty — warn user
-      if(APP.produtos.length>0&&Object.keys(APP.curvaABC).length===0){
-        toast('⚠ Importe a Curva ABC para usar este filtro','orange');
-      }
+      // No produtos — use getCurvaRom which uses the cache
+      // Build from dados directly using romaneio numbers
+      romCurvaSet={};
+      // We can't know per-product curva without produtos.json
+      // Show warning and load in background
+      toast('⚠ Carregando produtos para filtro de curva...','orange');
+      loadProdutosSilent().then(()=>{
+        // After load, re-apply
+        setTimeout(applyFilters, 100);
+      });
     }
   }
 
@@ -1264,11 +1269,14 @@ function applyFilters(){
     } else if(mes&&d.mes!==mes){
       return false;
     }
-    // Filtro de curva: romaneio deve ter produto de ALGUMA das curvas selecionadas
+    // Filtro de curva
     if(filtCurva.length>0&&romCurvaSet){
-      const cvs=romCurvaSet[d.romaneio]||new Set(['?']);
+      const cvs=romCurvaSet[String(d.romaneio)]||new Set(['?']);
       const match=filtCurva.some(fc=>cvs.has(fc));
       if(!match) return false;
+    } else if(filtCurva.length>0&&!romCurvaSet){
+      // romCurvaSet null = curvaABC not loaded, show all (don't block)
+      return true;
     }
     return true;
   });
@@ -2085,24 +2093,22 @@ async function loadProdutos(){
 
 // Carrega produtos silenciosamente em segundo plano (sem spinner, sem toast)
 async function loadProdutosSilent(){
-  if(APP.produtos.length>0) return Promise.resolve();
-  if(APP.produtos.length > 0) return;
+  if(APP.produtos.length>0) return; // already loaded
   try{
     const resp = await fetch('produtos.json');
-    if(!resp.ok) return; // falha silenciosa
+    if(!resp.ok) return;
     APP.produtos = await resp.json();
-    // Atualiza contador da aba
     const cnt = document.getElementById('cnt-produtos');
     if(cnt) cnt.textContent = APP.produtos.length.toLocaleString('pt-BR');
-    // Se o dashboard estiver aberto e tiver seleção, re-renderiza o drilldown
     const dashSection = document.getElementById('section-dashboard');
     if(dashSection?.classList.contains('active')){
       renderDashDrillDown(dadosDashFinal());
     }
-    // Inicializa filtros da aba produtos para quando o usuário abrir
     initProdFilters();
+    // If curva filter is active, re-apply now that products are loaded
+    if(APP.curvaFiltros?.length>0) applyFilters();
   }catch(e){
-    // silencioso — produtos.json pode não existir ainda
+    // silent
   }
 }
 window.loadProdutosSilent = loadProdutosSilent;
@@ -3052,6 +3058,9 @@ function applyCurvaFilter(){
   const selected=Object.entries(idMap)
     .filter(([id])=>document.getElementById('cd-'+id)?.checked)
     .map(([,v])=>v);
+  console.log('[Curva Filter] selected=',selected,
+    'curvaABC keys=',Object.keys(APP.curvaABC).length,
+    'produtos=',APP.produtos.length);
   const allChk=document.getElementById('cd-ALL');
   if(!selected.length){
     if(allChk) allChk.checked=true;
