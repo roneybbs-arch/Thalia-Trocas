@@ -2556,29 +2556,36 @@ function handleCurvaXlsx(evt){
     let skip=0;
     // detect header row
     let start=0;
-    const h0=String(raw[0]?.[0]||'').toUpperCase();
-    if(isNaN(Number(h0))||h0.includes('COD')||h0.includes('PROD')) start=1;
+    const h0=String(raw[0]?.[0]||'').replace(/[\uFEFF\s]/g,'').toUpperCase();
+    if(isNaN(Number(h0))||h0.includes('COD')||h0.includes('PROD')||h0.includes('ITEM')) start=1;
 
     // detect columns: could be COD|CURVA or COD|LOJA|CURVA
     // check header or first data row to find curva column index
     const headerRow = raw[start-1] || raw[start] || [];
-    const hCols = headerRow.map(c=>String(c||'').toUpperCase());
+    const hCols = headerRow.map(c=>String(c||'').replace(/[\uFEFF\s]/g,'').toUpperCase());
     let colCod=0, colCurva=-1;
     // try to find by header name
     hCols.forEach((h,i)=>{
       if(h.includes('COD')||h.includes('PROD')) colCod=i;
       if(h==='CURVA'||h==='CURVA ABC'||h==='CLASSIF') colCurva=i;
     });
-    // if not found by name, detect by position: last column that contains A/B/C
+    // if not found by name, detect by position: scan last columns for A/B/C/D/E
     if(colCurva<0){
-      // sample first data row
       const sample=raw[start]||[];
       for(let i=sample.length-1;i>=1;i--){
-        if(['A','B','C'].includes(String(sample[i]||'').trim().toUpperCase())){
+        if(['A','B','C','D','E'].includes(String(sample[i]||'').trim().toUpperCase())){
           colCurva=i; break;
         }
       }
-      if(colCurva<0) colCurva=raw[0]?.length>=3?2:1; // fallback: 3 cols=idx2, 2 cols=idx1
+      // Validate by checking multiple rows
+      if(colCurva>=0){
+        let validCount=0;
+        for(let i=start;i<Math.min(start+20,raw.length);i++){
+          if(['A','B','C','D','E'].includes(String(raw[i]?.[colCurva]||'').trim().toUpperCase())) validCount++;
+        }
+        if(validCount<3) colCurva=-1; // not reliable, reset
+      }
+      if(colCurva<0) colCurva=raw[0]?.length>=3?2:1;
     }
 
     // Accumulate votes per product (moda entre lojas)
