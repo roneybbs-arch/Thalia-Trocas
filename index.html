@@ -1229,18 +1229,15 @@ function applyFilters(){
   const periAte=document.getElementById('f-periodo-ate')?.value||'';
   const statusFiltros=APP.statusFiltros||[];
 
-  // Pre-build romaneio→curva map if curva filter active (fast lookup)
-  let romCurvaMap=null;
+  // Pre-build romaneio→Set(curvas) map — romaneio passes if it has ANY product of the selected curva
+  let romCurvaSet=null;
   if(filtCurva&&APP.produtos.length>0){
-    romCurvaMap={};
+    romCurvaSet={};
     APP.produtos.forEach(p=>{
       const rom=p.romaneio;
       const cv=getCurva(p.cod_produto);
-      // Keep best (most critical) curva per romaneio
-      const order={'A':0,'B':1,'C':2,'D':3,'E':4,'?':5};
-      if(romCurvaMap[rom]===undefined||(order[cv]??5)<(order[romCurvaMap[rom]]??5)){
-        romCurvaMap[rom]=cv;
-      }
+      if(!romCurvaSet[rom]) romCurvaSet[rom]=new Set();
+      romCurvaSet[rom].add(cv);
     });
   }
 
@@ -1256,9 +1253,9 @@ function applyFilters(){
       return false;
     }
     // Filtro de curva: romaneio deve ter ao menos um produto da curva selecionada
-    if(filtCurva&&romCurvaMap){
-      const cv=romCurvaMap[d.romaneio]||'?';
-      if(filtCurva==='?'?cv!=='?':cv!==filtCurva) return false;
+    if(filtCurva&&romCurvaSet){
+      const cvs=romCurvaSet[d.romaneio]||new Set(['?']);
+      if(filtCurva==='?' ? !cvs.has('?') : !cvs.has(filtCurva)) return false;
     }
     return true;
   });
