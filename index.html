@@ -3032,22 +3032,22 @@ function toggleCurvaDd(){
 window.toggleCurvaDd=toggleCurvaDd;
 
 function toggleCurvaOpt(k){
+  // onchange already updated checkbox state — just sync logic
   if(k==='ALL'){
+    // clear all individual selections
     ['A','B','C','D','E','X'].forEach(c=>{
       const el=document.getElementById('cd-'+c); if(el) el.checked=false;
     });
     const allEl=document.getElementById('cd-ALL'); if(allEl) allEl.checked=true;
-    APP.curvaFiltros=[];
-    document.getElementById('curva-dd-label').textContent='Todas';
-    const inp=document.getElementById('f-curva'); if(inp) inp.value='';
-    applyFilters();
-    return;
+  } else {
+    // uncheck "Todas" when any specific curva selected
+    const allEl=document.getElementById('cd-ALL'); if(allEl) allEl.checked=false;
+    // if nothing selected, revert to Todas
+    const anyChecked=['A','B','C','D','E','X'].some(c=>document.getElementById('cd-'+c)?.checked);
+    if(!anyChecked){
+      const allEl2=document.getElementById('cd-ALL'); if(allEl2) allEl2.checked=true;
+    }
   }
-  // Toggle this option
-  const el=document.getElementById('cd-'+k); if(!el) return;
-  el.checked=!el.checked;
-  // Uncheck "Todas" if anything selected
-  const allEl=document.getElementById('cd-ALL'); if(allEl) allEl.checked=false;
   applyCurvaFilter();
 }
 window.toggleCurvaOpt=toggleCurvaOpt;
@@ -4096,33 +4096,33 @@ document.addEventListener('DOMContentLoaded', function(){
           <div id="curva-dd-btn" onclick="window.toggleCurvaDd&&window.toggleCurvaDd()" style="display:flex;align-items:center;gap:6px;background:var(--bg2);border:1.5px solid var(--border);color:var(--text);border-radius:7px;padding:6px 10px;cursor:pointer;min-width:120px;font-size:13px;user-select:none;transition:border-color .15s">
             <span id="curva-dd-label">Todas</span><span style="font-size:10px;opacity:.5;margin-left:auto">▾</span>
           </div>
-          <div id="curva-dd" style="display:none;position:absolute;top:calc(100% + 4px);right:0;z-index:400;background:var(--surface);border:1.5px solid var(--border2);border-radius:8px;padding:6px 0;min-width:160px;box-shadow:var(--shadow-lg)">
-            <div class="sd-item" onclick="window.toggleCurvaOpt('ALL');event.stopPropagation()">
-              <input type="checkbox" id="cd-ALL" checked onclick="event.stopPropagation()">
+          <div id="curva-dd" style="display:none;position:absolute;top:calc(100% + 4px);right:0;z-index:400;background:var(--surface);border:1.5px solid var(--border2);border-radius:8px;padding:6px 0;min-width:160px;box-shadow:var(--shadow-lg)" onclick="event.stopPropagation()">
+            <div class="sd-item">
+              <input type="checkbox" id="cd-ALL" checked onchange="window.toggleCurvaOpt('ALL')">
               <span>Todas</span>
             </div>
-            <div class="sd-item" onclick="window.toggleCurvaOpt('A');event.stopPropagation()">
-              <input type="checkbox" id="cd-A" onclick="event.stopPropagation()">
+            <div class="sd-item">
+              <input type="checkbox" id="cd-A" onchange="window.toggleCurvaOpt('A')">
               <span style="color:var(--red)">■ Curva A 🚨</span>
             </div>
-            <div class="sd-item" onclick="window.toggleCurvaOpt('B');event.stopPropagation()">
-              <input type="checkbox" id="cd-B" onclick="event.stopPropagation()">
+            <div class="sd-item">
+              <input type="checkbox" id="cd-B" onchange="window.toggleCurvaOpt('B')">
               <span style="color:var(--amber)">■ Curva B</span>
             </div>
-            <div class="sd-item" onclick="window.toggleCurvaOpt('C');event.stopPropagation()">
-              <input type="checkbox" id="cd-C" onclick="event.stopPropagation()">
+            <div class="sd-item">
+              <input type="checkbox" id="cd-C" onchange="window.toggleCurvaOpt('C')">
               <span style="color:var(--green)">■ Curva C</span>
             </div>
-            <div class="sd-item" onclick="window.toggleCurvaOpt('D');event.stopPropagation()">
-              <input type="checkbox" id="cd-D" onclick="event.stopPropagation()">
+            <div class="sd-item">
+              <input type="checkbox" id="cd-D" onchange="window.toggleCurvaOpt('D')">
               <span style="color:#8b5cf6">■ Curva D</span>
             </div>
-            <div class="sd-item" onclick="window.toggleCurvaOpt('E');event.stopPropagation()">
-              <input type="checkbox" id="cd-E" onclick="event.stopPropagation()">
+            <div class="sd-item">
+              <input type="checkbox" id="cd-E" onchange="window.toggleCurvaOpt('E')">
               <span style="color:var(--text-dim)">■ Curva E</span>
             </div>
-            <div class="sd-item" onclick="window.toggleCurvaOpt('?');event.stopPropagation()">
-              <input type="checkbox" id="cd-X" onclick="event.stopPropagation()">
+            <div class="sd-item">
+              <input type="checkbox" id="cd-X" onchange="window.toggleCurvaOpt('?')">
               <span>Sem curva</span>
             </div>
           </div>
