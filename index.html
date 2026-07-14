@@ -353,6 +353,7 @@ async function carregarDados() {
     renderTable();
     // Carrega produtos em segundo plano silenciosamente
     loadProdutosSilent();
+    carregarCurva();
   } catch(e) {
     setLoading(false);
     toast('❌ Erro ao carregar dados: ' + e.message, 'red');
@@ -2265,6 +2266,43 @@ window.filtrarMarcasChart = renderMarcasChart;
 // ══════════════════════════════════════════════════════════
 // CURVA ABC — dicionário de referência global
 // ══════════════════════════════════════════════════════════
+// ── Curva ABC: persiste no Firestore (coleção 'config', doc 'curva_abc') ──
+async function carregarCurva(){
+  try{
+    const snap=await getDoc(doc(db,'config','curva_abc'));
+    if(!snap.exists()) return;
+    const data=snap.data();
+    APP.curvaABC=JSON.parse(data.curvaData||'{}');
+    APP.curvaQtd=data.qtd||0;
+    APP.curvaImportadaEm=new Date(data.importadaEm||0);
+    const dataRef=data.dataRef||'';
+    const badge=document.getElementById('curva-status-badge');
+    if(badge) badge.innerHTML=`<span style="color:var(--green);font-weight:600">✅ ${APP.curvaQtd.toLocaleString('pt-BR')} produtos com curva</span>${dataRef?' · ref: '+dataRef:''}`;
+    const log=document.getElementById('curva-import-log');
+    if(log) log.innerHTML=`<span class="log-ok">✅ Curva carregada do servidor — ${APP.curvaQtd.toLocaleString('pt-BR')} produtos${dataRef?' · ref: '+dataRef:''}</span>`;
+    // Re-render if curva tab is open
+    if(document.getElementById('subpanel-curva')?.style.display!=='none') renderCurvaABC();
+  }catch(e){
+    console.log('Curva ABC: nao encontrada no servidor.');
+  }
+}
+window.carregarCurva=carregarCurva;
+
+async function salvarCurvaFirestore(novo,qtd,dataRef){
+  try{
+    await setDoc(doc(db,'config','curva_abc'),{
+      curvaData:JSON.stringify(novo),
+      qtd:qtd,
+      dataRef:dataRef||'',
+      importadaEm:new Date().toISOString()
+    });
+    const log=document.getElementById('curva-import-log');
+    if(log) log.innerHTML+=`<br><span class="log-ok">☁ Salvo no servidor — nao precisará reimportar ao entrar novamente</span>`;
+  }catch(e){
+    toast('Aviso: curva importada mas nao salva no servidor: '+e.message,'orange');
+  }
+}
+
 APP.curvaABC = {};       // { cod_produto: 'A'|'B'|'C' }
 APP.curvaImportadaEm = null;
 APP.curvaQtd = 0;
@@ -2353,7 +2391,8 @@ function handleCurvaXlsx(evt){
 <span class="log-warn">⚠ ${multi} produtos com curva diferente entre lojas → usada a moda (mais frequente)</span>`:'')
       +(skip>0?`
 <span class="log-warn">⚠ ${skip} linhas ignoradas</span>`:'');
-    toast('✅ Curva ABC atualizada — '+ok.toLocaleString('pt-BR')+' produtos','green');
+    salvarCurvaFirestore(novo,ok,dataRef);
+    toast('✅ Curva ABC atualizada e salva — '+ok.toLocaleString('pt-BR')+' produtos','green');
     if(document.getElementById('subpanel-curva')?.style.display!=='none') renderCurvaABC();
   }
 
