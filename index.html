@@ -647,7 +647,7 @@ document.addEventListener('click',function(e){
 });
 
 // ══ DASH SELECTION STATE ══
-APP.dashSel = { marca:null, loja:null, mes:null, motivo:null, status:null };
+APP.dashSel = { marca:null, loja:null, mes:null, motivo:null, status:null, curva:null };
 
 function dashClick(tipo, valor){
   // Toggle: if already selected, deselect
@@ -658,7 +658,7 @@ function dashClick(tipo, valor){
 window.dashClick=dashClick;
 
 function dashClearSel(){
-  APP.dashSel={marca:null,loja:null,mes:null,motivo:null,status:null};
+  APP.dashSel={marca:null,loja:null,mes:null,motivo:null,status:null,curva:null};
   renderDashboard();
 }
 window.dashClearSel=dashClearSel;
@@ -673,6 +673,11 @@ function dadosDashFinal(){
     if(s.mes   && d.mes!==s.mes)             return false;
     if(s.motivo&& d.motivo!==s.motivo)       return false;
     if(s.status&& d.status!==s.status)       return false;
+    // curva filter uses produtos join
+    if(s.curva){
+      const roms=new Set(APP.produtos.filter(p=>getCurva(p.cod_produto)===s.curva).map(p=>p.romaneio));
+      if(!roms.has(d.romaneio)) return false;
+    }
     return true;
   });
 }
@@ -828,8 +833,9 @@ function renderDashboard() {
       </div>
     </div>`;
   }).join('');
-  renderCurvaChart();
   renderDashDrillDown(d);
+  // Render curva chart after dashboard paints (avoids blocking render)
+  setTimeout(()=>renderCurvaChart(),0);
 }
 
 // ── DRILL-DOWN de produtos no dashboard ──────────────────────────────
@@ -857,15 +863,18 @@ function renderCurvaChart(){
 
   // Use produtos filtered by same romaneios as d
   const romSet = new Set(d.map(x=>x.romaneio));
-  const prodsD = APP.produtos.filter(p=>romSet.has(p.romaneio));
+  // Only use produtos if loaded — avoid blocking if not ready
+  const prodsD = APP.produtos.length>0 ? APP.produtos.filter(p=>romSet.has(p.romaneio)) : [];
   prodsD.forEach(p=>{
     const cv=getCurva(p.cod_produto);
     if(!byCurva[cv]) byCurva[cv]={qtd:0,val:0,roms:new Set()};
     byCurva[cv].qtd+=p.quantidade;
     byCurva[cv].roms.add(p.romaneio);
   });
-  // Also add valor from romaneio data
+  // Add valor from romaneio data (use romaneio's curva predominante)
   d.forEach(x=>{
+    const romProds=prodsD.filter(p=>p.romaneio===x.romaneio);
+    if(romProds.length===0) return;
     const cv=getCurvaRom(x);
     if(byCurva[cv]) byCurva[cv].val+=x.valor||0;
   });
@@ -982,72 +991,111 @@ function renderCurvaProdPanel(curva, prodsD, byCurva){
 window.renderCurvaProdPanel = renderCurvaProdPanel;
 
 function renderDashDrillDown(d) {
-  const el=document.getElementById('dash-drilldown');
-  if(!el) return;
-  const hasSel=Object.values(APP.dashSel).some(v=>v);
-  if(!hasSel){ el.style.display='none'; return; }
-  el.style.display='block';
+  const wrap=document.getElementById('dash-drill-wrap');
+  if(!wrap) return;
+  const s=APP.dashSel;
+  const hasSel=Object.values(s).some(v=>v);
+  if(!hasSel){ wrap.style.display='none'; return; }
+  wrap.style.display='block';
+  const dAll=dadosDashboard();
 
-  const selLabel=Object.entries(APP.dashSel).filter(([,v])=>v).map(([k,v])=>{
-    const lbl={marca:'Marca',loja:'Loja',mes:'Mês',motivo:'Motivo',status:'Status'};
-    return `${lbl[k]}: <strong>${v}</strong>`;
-  }).join(' · ');
+  // ── BREADCRUMB ──────────────────────────────────────────
+  const lblMap={marca:'Marca',loja:'Loja',mes:'Mês',motivo:'Motivo',status:'Status',curva:'Curva'};
+  const bc=document.getElementById('dash-breadcrumb');
+  if(bc){
+    const activeEntries=Object.entries(s).filter(([,v])=>v);
+    bc.innerHTML='<span style="font-size:11px;color:var(--text-dim)">Todos os dados</span>'+
+      activeEntries.map(([k,v])=>{
+        const safeV=v.replace(/"/g,'&quot;');
+        return '<span style="color:var(--text-dim);font-size:12px"> › </span>'+
+          '<span class="dash-tag" style="cursor:pointer" onclick="window.dashClick(&quot;'+k+'&quot;,&quot;'+safeV+'&quot;)" title="Clique para remover">'+
+          (lblMap[k]||k)+': '+v+' ✕</span>';
+      }).join('');
+  }
 
-  // Get matching products from APP.produtos
-  const prods = APP.produtos.filter(p=>{
-    const s=APP.dashSel;
-    if(s.marca && p.marca_fornecedor!==s.marca) return false;
-    if(s.loja  && p.loja!==s.loja)              return false;
-    if(s.mes   && p.mes!==s.mes)                return false;
-    if(s.motivo&& p.motivo!==s.motivo)          return false;
-    if(s.status&& p.status!==s.status)          return false;
-    return true;
+  // ── LEFT: smart breakdown ─────────────────────────────────
+  const dims=[
+    {k:'motivo',fn:x=>x.motivo},
+    {k:'marca', fn:x=>x.marca?.trim()||'—'},
+    {k:'loja',  fn:x=>x.loja},
+    {k:'mes',   fn:x=>x.mes},
+    {k:'status',fn:x=>x.status},
+  ];
+  const nextDim=dims.find(dim=>!s[dim.k])||dims[1];
+  const dimLblMap={motivo:'Por Motivo',marca:'Por Marca',loja:'Por Loja',mes:'Por Mês',status:'Por Status'};
+  const titleEl=document.getElementById('drill-left-title');
+  if(titleEl) titleEl.textContent=dimLblMap[nextDim.k]||'Detalhamento';
+
+  const byDim={};
+  d.forEach(x=>{
+    const k=nextDim.fn(x)||'—';
+    if(!byDim[k])byDim[k]={v:0,n:0,rawKey:k};
+    byDim[k].v+=x.valor||0; byDim[k].n++;
   });
+  const leftRows=Object.entries(byDim).sort((a,b)=>b[1].v-a[1].v).slice(0,12);
+  const maxV=leftRows[0]?.[1]?.v||1;
+  const totalV=d.reduce((a,b)=>a+(b.valor||0),0)||1;
+  const motCor={VALIDADE:'var(--blue)',DANIFICADO:'var(--red)',ALTERADO:'var(--purple)'};
+  const stCor2={PENDENTE:'var(--text-dim)',EXTRAÍDO:'var(--blue)',NOTA_EMITIDA:'var(--amber)',AG_RETIRADA:'var(--cyan)',RETIRADO:'var(--green)',DESCARTE:'var(--orange)'};
 
-  // Aggregate by product
+  // Build left panel using index-based click (avoids quote escaping issues)
+  window._drillRows = leftRows.map(([k])=>({dim:nextDim.k, val:k}));
+  const leftEl=document.getElementById('drill-left-body');
+  if(leftEl){
+    leftEl.innerHTML=leftRows.map(([k,v],idx)=>{
+      const isSel=s[nextDim.k]===k;
+      const pct=(v.v/totalV*100).toFixed(1);
+      const cor=nextDim.k==='motivo'?(motCor[k]||'var(--amber)'):nextDim.k==='status'?(stCor2[k]||'var(--text-dim)'):'var(--amber)';
+      return `<div class="dash-bar-item ${isSel?'dash-bar-sel':''}" style="cursor:pointer;padding:4px 6px" onclick="window.drillRowClick(${idx})">
+        <div class="bar-header">
+          <span style="font-size:11px;font-weight:${isSel?700:400}">${k}</span>
+          <span style="font-size:10px;font-family:var(--mono);color:${cor}">${pct}% · ${v.n}</span>
+        </div>
+        <div class="bar-track" style="position:relative">
+          <div style="position:absolute;inset:0;background:var(--border2);border-radius:3px"></div>
+          <div class="bar-fill" style="width:${(v.v/maxV*100).toFixed(1)}%;background:${isSel?'var(--amber)':cor};position:relative;transition:width .4s"></div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+    // ── RIGHT: product ranking ────────────────────────────────
+  const romSet2=new Set(d.map(x=>x.romaneio));
+  const prodsD2=APP.produtos.filter(p=>romSet2.has(p.romaneio));
   const byProd={};
-  prods.forEach(p=>{
-    const k=p.cod_produto+'|'+p.descricao;
-    if(!byProd[k]) byProd[k]={cod:String(p.cod_produto),desc:p.descricao,qtd:0,roms:new Set(),marca:p.marca_produto||p.marca_fornecedor};
-    byProd[k].qtd+=p.quantidade;
-    byProd[k].roms.add(p.romaneio);
+  prodsD2.forEach(p=>{
+    const k=String(p.cod_produto)+'|'+p.descricao;
+    if(!byProd[k])byProd[k]={cod:String(p.cod_produto),desc:p.descricao,qtd:0,roms:new Set(),marca:p.marca_fornecedor||p.marca_produto||''};
+    byProd[k].qtd+=p.quantidade; byProd[k].roms.add(p.romaneio);
   });
   const topProds=Object.values(byProd).sort((a,b)=>b.qtd-a.qtd).slice(0,20);
-  const totalQtd=prods.reduce((a,b)=>a+b.quantidade,0);
+  const totalQtd=prodsD2.reduce((a,b)=>a+b.quantidade,0);
   const maxQ=topProds[0]?.qtd||1;
+  const totalSKUs=Object.keys(byProd).length;
 
-  el.innerHTML=`
-    <div class="drilldown-header">
-      <div>
-        <div class="drilldown-title">🔬 Drill-down: produtos</div>
-        <div class="drilldown-sub">${selLabel} &nbsp;·&nbsp; <strong>${prods.length.toLocaleString('pt-BR')}</strong> linhas &nbsp;·&nbsp; <strong>${totalQtd.toLocaleString('pt-BR')}</strong> unidades &nbsp;·&nbsp; <strong>${[...new Set(prods.map(p=>p.cod_produto))].length}</strong> SKUs distintos</div>
-      </div>
-      <button class="btn btn-sm btn-outline" onclick="window.dashClearSel()">✕ Limpar seleção</button>
-    </div>
-    <div class="drilldown-body">
-      ${topProds.length===0?'<div style="padding:20px;color:var(--text-dim);text-align:center">Nenhum produto encontrado — os dados de produtos precisam estar carregados na aba Produtos.</div>':
-        topProds.map((p,i)=>{
-          const cv=getCurva(p.cod);
-          const isAnomalia=cv==='A';
-          const cvBadge=cv==='?'?'':`<span class="curva-badge curva-${cv}" style="flex-shrink:0">${cv}</span>`;
-          const alertIcon=isAnomalia?'<span title="Produto Curva A — anomalia crítica!" style="font-size:12px">🚨</span>':'';
-          return `<div class="drilldown-row" style="background:${isAnomalia?'var(--red-bg)':'transparent'};border-radius:6px;padding:3px 4px">
-            <span class="drilldown-rank" style="color:${isAnomalia?'var(--red)':'var(--text-dim)'}">${i+1}</span>
-            ${cvBadge}
-            <div class="drilldown-info">
-              <span class="drilldown-name" style="color:${isAnomalia?'var(--red)':'var(--text)'}">${p.desc}</span>
-              <span class="drilldown-meta">${p.marca} · ${p.roms.size} romaneios</span>
-            </div>
-            <div class="drilldown-bar-wrap">
-              <div class="drilldown-bar" style="width:${(p.qtd/maxQ*100).toFixed(1)}%;background:${isAnomalia?'var(--red)':'var(--amber)'}"></div>
-            </div>
-            ${alertIcon}
-            <span class="drilldown-qtd" style="color:${isAnomalia?'var(--red)':'var(--amber)'}">${p.qtd}</span>
-          </div>`;
-        }).join('')
-      }
-    </div>
-  `;
+  const rightEl=document.getElementById('drill-right-body');
+  if(rightEl) rightEl.innerHTML=topProds.length===0
+    ?'<div style="color:var(--text-dim);font-size:12px;padding:12px">Carregue os produtos na aba Produtos para ver aqui.</div>'
+    :topProds.map((p,i)=>{
+      const cv=getCurva(p.cod);
+      const isA=cv==='A';
+      const cvBadge=cv==='?'?'':`<span class="curva-badge curva-${cv}" style="flex-shrink:0">${cv}</span>`;
+      return `<div style="display:flex;align-items:center;gap:7px;${isA?'background:var(--red-bg);border-radius:5px;padding:2px 4px':''}">
+        <span style="font-family:var(--mono);font-size:10px;color:${isA?'var(--red)':'var(--text-dim)'};width:16px;text-align:right">${i+1}</span>
+        ${cvBadge}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11px;font-weight:${i<3?600:400};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${isA?'var(--red)':'var(--text)'}" title="${p.desc}">${p.desc}</div>
+          <div style="height:3px;background:var(--bg2);border-radius:2px;margin-top:2px">
+            <div style="height:100%;width:${(p.qtd/maxQ*100).toFixed(1)}%;background:${isA?'var(--red)':'var(--amber)'};border-radius:2px;transition:width .4s"></div>
+          </div>
+        </div>
+        ${isA?'<span style="font-size:11px">🚨</span>':''}
+        <span style="font-family:var(--mono);font-size:11px;font-weight:600;color:${isA?'var(--red)':'var(--amber)'};min-width:32px;text-align:right">${p.qtd}</span>
+      </div>`;
+    }).join('');
+
+  const footEl=document.getElementById('drill-footer-info');
+  if(footEl) footEl.innerHTML='<strong>'+d.length.toLocaleString('pt-BR')+'</strong> romaneios · <strong>'+fmt(totalV)+'</strong> · <strong>'+totalQtd.toLocaleString('pt-BR')+'</strong> unidades · <strong>'+totalSKUs+'</strong> SKUs <span style="color:var(--text-dim)"> — clique nas barras para afunilar</span>';
 }
 
 // ══ GESTÃO ══
@@ -2597,16 +2645,28 @@ function getCurva(cod){
 }
 
 // Get the "best" (most critical) curva among products of a romaneio
+// Uses a cache to avoid recomputing on every render
+const _curvaRomCache = {};
+let _curvaRomCacheKey = '';
 function getCurvaRom(romaneio){
   if(!APP.produtos.length || !Object.keys(APP.curvaABC).length) return '?';
   const rom = typeof romaneio === 'object' ? romaneio.romaneio : romaneio;
+  // Invalidate cache if curvaABC changed
+  const cacheKey = Object.keys(APP.curvaABC).length+'';
+  if(cacheKey !== _curvaRomCacheKey){
+    Object.keys(_curvaRomCache).forEach(k=>delete _curvaRomCache[k]);
+    _curvaRomCacheKey = cacheKey;
+  }
+  if(_curvaRomCache[rom] !== undefined) return _curvaRomCache[rom];
   const prods = APP.produtos.filter(p=>p.romaneio===String(rom));
-  if(!prods.length) return '?';
+  if(!prods.length){ _curvaRomCache[rom]='?'; return '?'; }
   const order = ['A','B','C','D','E'];
   for(const c of order){
-    if(prods.some(p=>getCurva(p.cod_produto)===c)) return c;
+    if(prods.some(p=>getCurva(p.cod_produto)===c)){
+      _curvaRomCache[rom]=c; return c;
+    }
   }
-  return '?';
+  _curvaRomCache[rom]='?'; return '?';
 }
 
 // ── Filters ─────────────────────────────────────────────────
@@ -2900,6 +2960,11 @@ window.renderCvTable = renderCvTable;
 
 function goCvP(p){APP.cvPage=p;renderCvTable();}
 window.goCvP=goCvP;
+
+window.drillRowClick = function(idx){
+  const row = window._drillRows && window._drillRows[idx];
+  if(row) window.dashClick(row.dim, row.val);
+};
 
 Object.assign(window,{showTab,filtrarMes,applyFilters,resetFilters,sortBy,setChip,toggleTheme,dashClick,dashClearSel,renderDashDrillDown,renderCurvaChart,clickCurvaCard,clearCurvaClick,renderCurvaProdPanel,renderMarcasChart,filtrarMarcasChart,pushHistorico,updateUndoBtn,desfazerUltimo,revertEntry,abrirHistorico,fecharHistorico,renderHistoricoPanel,
   marcarFiltrados,renderPicker,selMarca,copiarExtracao,handleXlsx,importarPaste,
@@ -3553,8 +3618,31 @@ document.addEventListener('DOMContentLoaded', function(){
         </div>
       </div>
 
-      <!-- DRILL-DOWN PANEL -->
-      <div id="dash-drilldown" class="drilldown-panel" style="display:none"></div>
+      <!-- PROGRESSIVE DRILL-DOWN -->
+      <div id="dash-drill-wrap" style="display:none;margin-top:4px">
+        <!-- Breadcrumb -->
+        <div id="dash-breadcrumb" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px;padding:8px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px"></div>
+        <!-- Two panels side by side -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <!-- Left: summary breakdown -->
+          <div class="chart-card" style="padding:14px">
+            <div class="chart-title" id="drill-left-title">Resumo</div>
+            <div id="drill-left-body" style="display:flex;flex-direction:column;gap:5px;max-height:320px;overflow-y:auto"></div>
+          </div>
+          <!-- Right: product ranking -->
+          <div class="chart-card" style="padding:14px">
+            <div class="chart-title">🔬 Produtos no filtro</div>
+            <div id="drill-right-body" style="display:flex;flex-direction:column;gap:5px;max-height:320px;overflow-y:auto"></div>
+          </div>
+        </div>
+        <div style="margin-top:8px;display:flex;align-items:center;gap:10px">
+          <div id="drill-footer-info" style="font-size:11px;color:var(--text-dim)"></div>
+          <button class="btn btn-sm btn-outline" onclick="window.dashClearSel()" style="margin-left:auto;font-size:11px">✕ Limpar tudo</button>
+        </div>
+      </div>
+
+      <!-- Legacy drilldown (kept for compatibility) -->
+      <div id="dash-drilldown" style="display:none"></div>
 
     </div>
 
@@ -3909,6 +3997,7 @@ document.addEventListener('DOMContentLoaded', function(){
           <table><thead><tr>
             <th onclick="sortBy('mes')">Mês</th><th onclick="sortBy('loja')">Loja</th>
             <th onclick="sortBy('marca')">Marca</th><th onclick="sortBy('romaneio')">Romaneio</th>
+            <th style="width:52px;text-align:center">Curva</th>
             <th onclick="sortBy('motivo')">Motivo</th><th onclick="sortBy('valor')">Valor R$</th>
             <th>Status</th><th>Comprador</th><th id="th-edit" style="width:30px"></th><th id="th-del" style="width:30px"></th>
           </tr></thead>
