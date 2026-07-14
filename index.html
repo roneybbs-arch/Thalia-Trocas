@@ -858,7 +858,7 @@ function renderDashDrillDown(d) {
   const byProd={};
   prods.forEach(p=>{
     const k=p.cod_produto+'|'+p.descricao;
-    if(!byProd[k]) byProd[k]={desc:p.descricao,qtd:0,roms:new Set(),marca:p.marca_produto||p.marca_fornecedor};
+    if(!byProd[k]) byProd[k]={cod:String(p.cod_produto),desc:p.descricao,qtd:0,roms:new Set(),marca:p.marca_produto||p.marca_fornecedor};
     byProd[k].qtd+=p.quantidade;
     byProd[k].roms.add(p.romaneio);
   });
@@ -876,18 +876,25 @@ function renderDashDrillDown(d) {
     </div>
     <div class="drilldown-body">
       ${topProds.length===0?'<div style="padding:20px;color:var(--text-dim);text-align:center">Nenhum produto encontrado — os dados de produtos precisam estar carregados na aba Produtos.</div>':
-        topProds.map((p,i)=>`
-        <div class="drilldown-row">
-          <span class="drilldown-rank">${i+1}</span>
-          <div class="drilldown-info">
-            <span class="drilldown-name">${p.desc}</span>
-            <span class="drilldown-meta">${p.marca} · ${p.roms.size} romaneios</span>
-          </div>
-          <div class="drilldown-bar-wrap">
-            <div class="drilldown-bar" style="width:${(p.qtd/maxQ*100).toFixed(1)}%"></div>
-          </div>
-          <span class="drilldown-qtd">${p.qtd}</span>
-        </div>`).join('')
+        topProds.map((p,i)=>{
+          const cv=getCurva(p.cod);
+          const isAnomalia=cv==='A';
+          const cvBadge=cv==='?'?'':`<span class="curva-badge curva-${cv}" style="flex-shrink:0">${cv}</span>`;
+          const alertIcon=isAnomalia?'<span title="Produto Curva A — anomalia crítica!" style="font-size:12px">🚨</span>':'';
+          return `<div class="drilldown-row" style="background:${isAnomalia?'var(--red-bg)':'transparent'};border-radius:6px;padding:3px 4px">
+            <span class="drilldown-rank" style="color:${isAnomalia?'var(--red)':'var(--text-dim)'}">${i+1}</span>
+            ${cvBadge}
+            <div class="drilldown-info">
+              <span class="drilldown-name" style="color:${isAnomalia?'var(--red)':'var(--text)'}">${p.desc}</span>
+              <span class="drilldown-meta">${p.marca} · ${p.roms.size} romaneios</span>
+            </div>
+            <div class="drilldown-bar-wrap">
+              <div class="drilldown-bar" style="width:${(p.qtd/maxQ*100).toFixed(1)}%;background:${isAnomalia?'var(--red)':'var(--amber)'}"></div>
+            </div>
+            ${alertIcon}
+            <span class="drilldown-qtd" style="color:${isAnomalia?'var(--red)':'var(--amber)'}">${p.qtd}</span>
+          </div>`;
+        }).join('')
       }
     </div>
   `;
@@ -1152,6 +1159,7 @@ function renderTable(){
         <td class="td-loja">${d.loja}</td>
         <td class="td-marca" title="${d.marca}">${d.marca}</td>
         <td class="td-rom">${d.romaneio}</td>
+        <td style="text-align:center">${(()=>{const cv=getCurvaRom(d);return cv==='?'?'<span style="color:var(--border2);font-size:10px">—</span>':`<span class="curva-badge curva-${cv}">${cv}</span>`;})()}</td>
         <td><span class="bm bm-${d.motivo}">${d.motivo}</span></td>
         <td class="td-val ${vc}">${fmtN(d.valor)}</td>
         <td><select class="ss ss-${d.status}" onchange="updStatus('${d._docId}',this.value,this)">${o}</select></td>
@@ -1166,6 +1174,7 @@ function renderTable(){
         <td class="td-loja">${d.loja}</td>
         <td class="td-marca" title="${d.marca}">${d.marca}</td>
         <td class="td-rom">${d.romaneio}</td>
+        <td style="text-align:center">${(()=>{const cv=getCurvaRom(d);return cv==='?'?'<span style="color:var(--border2);font-size:10px">—</span>':`<span class="curva-badge curva-${cv}">${cv}</span>`;})()}</td>
         <td><span class="bm bm-${d.motivo}">${d.motivo}</span></td>
         <td class="td-val ${vc}">${fmtN(d.valor)}</td>
         <td><span class="ss ss-${d.status}" style="pointer-events:none">${oLbl[d.status]||d.status}</span></td>
@@ -2076,6 +2085,7 @@ function renderProdTable(){
 
   // Sort
   if(sortKey==='qtd') rows.sort((a,b)=>b.quantidade-a.quantidade);
+  else if(sortKey==='curva'){const cOrd={'A':0,'B':1,'C':2,'D':3,'E':4,'?':5};rows.sort((a,b)=>(cOrd[getCurva(a.cod_produto)]??5)-(cOrd[getCurva(b.cod_produto)]??5)||b.quantidade-a.quantidade);}
   else if(sortKey==='romaneio') rows.sort((a,b)=>+b.romaneio-+a.romaneio);
   else if(sortKey==='descricao') rows.sort((a,b)=>a.descricao?.localeCompare(b.descricao||'')||0);
   else if(sortKey==='loja') rows.sort((a,b)=>+a.loja-+b.loja);
@@ -2090,19 +2100,22 @@ function renderProdTable(){
   const stCor={PENDENTE:'var(--text-dim)',EXTRAÍDO:'var(--blue)',NOTA_EMITIDA:'var(--amber)',AG_RETIRADA:'var(--cyan)',RETIRADO:'var(--green)',DESCARTE:'var(--orange)'};
   const mC={VALIDADE:'bm-VALIDADE',DANIFICADO:'bm-DANIFICADO',ALTERADO:'bm-ALTERADO'};
 
-  document.getElementById('prod-table-body').innerHTML=slice.map(p=>`
-    <tr>
+  document.getElementById('prod-table-body').innerHTML=slice.map(p=>{
+    const cv=getCurva(p.cod_produto);
+    const cvBadge=cv==='?'?'<span style="color:var(--border2);font-size:10px">—</span>':`<span class="curva-badge curva-${cv}">${cv}</span>`;
+    return `<tr>
       <td class="td-mes">${p.mes||'-'}</td>
       <td class="td-loja">${p.loja}</td>
       <td class="td-rom">${p.romaneio}</td>
-      <td class="td-marca" title="${p.descricao}" style="max-width:220px">${p.descricao}</td>
+      <td class="td-marca" title="${p.descricao}" style="max-width:200px">${p.descricao}</td>
+      <td style="text-align:center">${cvBadge}</td>
       <td style="font-size:11px;color:var(--text-mid)">${p.marca_fornecedor||p.marca_produto||'-'}</td>
       <td style="font-family:var(--mono);font-weight:600;color:var(--amber)">${p.quantidade}</td>
       <td><span class="bm ${mC[p.motivo]||''}">${p.motivo}</span></td>
       <td><span style="font-size:10px;font-family:var(--mono);color:${stCor[p.status]||'var(--text-dim)'}">${p.status}</span></td>
       <td class="td-val val-l">${fmtN(p.valor_romaneio||0)}</td>
-    </tr>
-  `).join('');
+    </tr>`;
+  }).join('');
 
   renderProdPagination(total);
 }
@@ -2393,6 +2406,19 @@ document.addEventListener('DOMContentLoaded',function(){
 function getCurva(cod){
   if(!cod) return '?';
   return APP.curvaABC[String(cod)] || '?';
+}
+
+// Get the "best" (most critical) curva among products of a romaneio
+function getCurvaRom(romaneio){
+  if(!APP.produtos.length || !Object.keys(APP.curvaABC).length) return '?';
+  const rom = typeof romaneio === 'object' ? romaneio.romaneio : romaneio;
+  const prods = APP.produtos.filter(p=>p.romaneio===String(rom));
+  if(!prods.length) return '?';
+  const order = ['A','B','C','D','E'];
+  for(const c of order){
+    if(prods.some(p=>getCurva(p.cod_produto)===c)) return c;
+  }
+  return '?';
 }
 
 // ── Filters ─────────────────────────────────────────────────
@@ -3417,6 +3443,7 @@ document.addEventListener('DOMContentLoaded', function(){
             <input type="text" id="prod-table-busca" placeholder="Buscar produto..." oninput="window.renderProdTable&&window.renderProdTable()" style="width:200px">
             <select id="prod-table-sort" onchange="window.renderProdTable&&window.renderProdTable()" style="font-size:12px">
               <option value="qtd">↓ Maior qtd</option>
+              <option value="curva">Por curva (A→E)</option>
               <option value="romaneio">↓ Romaneio</option>
               <option value="descricao">A-Z Produto</option>
               <option value="loja">Por loja</option>
@@ -3426,7 +3453,7 @@ document.addEventListener('DOMContentLoaded', function(){
         <div class="table-scroll">
           <table><thead><tr>
             <th>Mês</th><th>Loja</th><th>Romaneio</th>
-            <th>Produto</th><th>Marca</th><th>Qtd</th>
+            <th>Produto</th><th>Curva</th><th>Marca</th><th>Qtd</th>
             <th>Motivo</th><th>Status</th><th>Vlr Romaneio</th>
           </tr></thead>
           <tbody id="prod-table-body"></tbody></table>
