@@ -4063,8 +4063,8 @@ document.addEventListener('DOMContentLoaded', function(){
         <div class="fg"><div class="flbl">Comprador</div><select id="f-comp" onchange="window.applyFilters&&window.applyFilters()"><option value="">Todos</option></select></div>
         <div class="fg" style="position:relative">
           <div class="flbl">Curva</div>
-          <div class="status-dd-btn" id="curva-dd-btn" onclick="window.toggleCurvaDd&&window.toggleCurvaDd()">
-            <span id="curva-dd-label">Todas</span><span style="font-size:10px;opacity:.5;margin-left:4px">▾</span>
+          <div id="curva-dd-btn" onclick="window.toggleCurvaDd&&window.toggleCurvaDd()" style="display:flex;align-items:center;gap:6px;background:var(--bg2);border:1.5px solid var(--border);color:var(--text);border-radius:7px;padding:6px 10px;cursor:pointer;min-width:120px;font-size:13px;user-select:none;transition:border-color .15s">
+            <span id="curva-dd-label">Todas</span><span style="font-size:10px;opacity:.5;margin-left:auto">▾</span>
           </div>
           <div class="status-dd" id="curva-dd" style="display:none;position:absolute;top:100%;right:0;z-index:300;background:var(--surface);border:1.5px solid var(--border2);border-radius:var(--radius);padding:6px 0;min-width:150px;box-shadow:var(--shadow-lg);margin-top:4px">
             <label class="sd-item" onclick="window.toggleCurvaOpt('ALL')">
