@@ -1223,7 +1223,7 @@ function applyFilters(){
   const loja=document.getElementById('f-loja').value;
   const motivo=document.getElementById('f-motivo').value;
   const comp=document.getElementById('f-comp').value;
-  const filtCurva=document.getElementById('f-curva')?.value||'';
+  const filtCurva=APP.curvaFiltros||[]; // array of selected curvas
   const mes=document.getElementById('f-mes').value;
   const periDe=document.getElementById('f-periodo-de')?.value||'';
   const periAte=document.getElementById('f-periodo-ate')?.value||'';
@@ -1231,7 +1231,7 @@ function applyFilters(){
 
   // Pre-build romaneio→Set(curvas) map — romaneio passes if it has ANY product of the selected curva
   let romCurvaSet=null;
-  if(filtCurva&&APP.produtos.length>0){
+  if(filtCurva.length>0&&APP.produtos.length>0){
     romCurvaSet={};
     APP.produtos.forEach(p=>{
       const rom=p.romaneio;
@@ -1252,10 +1252,11 @@ function applyFilters(){
     } else if(mes&&d.mes!==mes){
       return false;
     }
-    // Filtro de curva: romaneio deve ter ao menos um produto da curva selecionada
-    if(filtCurva&&romCurvaSet){
+    // Filtro de curva: romaneio deve ter produto de ALGUMA das curvas selecionadas
+    if(filtCurva.length>0&&romCurvaSet){
       const cvs=romCurvaSet[d.romaneio]||new Set(['?']);
-      if(filtCurva==='?' ? !cvs.has('?') : !cvs.has(filtCurva)) return false;
+      const match=filtCurva.some(fc=>cvs.has(fc));
+      if(!match) return false;
     }
     return true;
   });
@@ -1263,6 +1264,10 @@ function applyFilters(){
 }
 
 function resetFilters(){
+  APP.curvaFiltros=[];
+  ['cd-A','cd-B','cd-C','cd-D','cd-E','cd-X'].forEach(id=>{const el=document.getElementById(id);if(el)el.checked=false;});
+  const cdAll=document.getElementById('cd-ALL');if(cdAll)cdAll.checked=true;
+  const cvLbl=document.getElementById('curva-dd-label');if(cvLbl)cvLbl.textContent='Todas';
   ['f-busca','f-loja','f-motivo','f-comp','f-curva','f-mes','f-periodo-de','f-periodo-ate'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.value='';
   });
@@ -1861,7 +1866,7 @@ function exportarTXT(){
   const motivo=document.getElementById('f-motivo')?.value; if(motivo) infos.push('Motivo: '+motivo);
   const sf=APP.statusFiltros||[]; if(sf.length) infos.push('Status: '+sf.join(', '));
   const comp=document.getElementById('f-comp')?.value; if(comp) infos.push('Comprador: '+comp);
-  const cvExp=document.getElementById('f-curva')?.value; if(cvExp) infos.push('Curva: '+cvExp);
+  if(APP.curvaFiltros?.length>0) infos.push('Curva: '+APP.curvaFiltros.join('+'));
   const busca=document.getElementById('f-busca')?.value; if(busca) infos.push('Busca: "'+busca+'"');
   if(infos.length) txt+='Filtros: '+infos.join(' | ')+'\n';
   txt+=`Registros: ${d.length} | Total: R$ ${d.reduce((a,b)=>a+(b.valor||0),0).toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,'.')}\n`;
@@ -2997,6 +3002,60 @@ window.renderCvTable = renderCvTable;
 function goCvP(p){APP.cvPage=p;renderCvTable();}
 window.goCvP=goCvP;
 
+// ══ CURVA MULTI-SELECT DROPDOWN ══
+APP.curvaFiltros = []; // selected curvas, empty = all
+
+function toggleCurvaDd(){
+  const dd=document.getElementById('curva-dd');
+  if(dd) dd.style.display=dd.style.display==='none'?'block':'none';
+}
+window.toggleCurvaDd=toggleCurvaDd;
+
+function toggleCurvaOpt(k){
+  const isAll=k==='ALL';
+  if(isAll){
+    const allChk=document.getElementById('cd-ALL');
+    const all=allChk?.checked;
+    ['A','B','C','D','E','?'].forEach(c=>{
+      const el=document.getElementById('cd-'+c); if(el) el.checked=false;
+    });
+    APP.curvaFiltros=[];
+  } else {
+    document.getElementById('cd-ALL').checked=false;
+    const el=document.getElementById('cd-'+k);
+    if(el) el.checked=!el.checked;
+  }
+  applyCurvaFilter();
+}
+window.toggleCurvaOpt=toggleCurvaOpt;
+
+function applyCurvaFilter(){
+  const allChk=document.getElementById('cd-ALL');
+  const selected=['A','B','C','D','E','?'].filter(c=>document.getElementById('cd-'+c)?.checked);
+  if(!selected.length){
+    if(allChk) allChk.checked=true;
+    APP.curvaFiltros=[];
+    document.getElementById('curva-dd-label').textContent='Todas';
+  } else {
+    if(allChk) allChk.checked=false;
+    APP.curvaFiltros=selected;
+    const lbl=selected.length===1?'Curva '+selected[0]:selected.map(c=>'Curva '+c).join(', ');
+    document.getElementById('curva-dd-label').textContent=lbl;
+  }
+  // Sync hidden input for export info
+  const inp=document.getElementById('f-curva');
+  if(inp) inp.value=APP.curvaFiltros.join(',');
+  applyFilters();
+}
+window.applyCurvaFilter=applyCurvaFilter;
+
+// Close on outside click
+document.addEventListener('click',function(e){
+  const btn=document.getElementById('curva-dd-btn');
+  const dd=document.getElementById('curva-dd');
+  if(btn&&dd&&!btn.contains(e.target)&&!dd.contains(e.target)) dd.style.display='none';
+});
+
 window.drillRowClick = function(idx){
   const row = window._drillRows && window._drillRows[idx];
   if(row) window.dashClick(row.dim, row.val);
@@ -4002,17 +4061,43 @@ document.addEventListener('DOMContentLoaded', function(){
           </div>
         </div>
         <div class="fg"><div class="flbl">Comprador</div><select id="f-comp" onchange="window.applyFilters&&window.applyFilters()"><option value="">Todos</option></select></div>
-        <div class="fg"><div class="flbl">Curva</div>
-          <select id="f-curva" onchange="window.applyFilters&&window.applyFilters()">
-            <option value="">Todas</option>
-            <option value="A">Curva A 🚨</option>
-            <option value="B">Curva B</option>
-            <option value="C">Curva C</option>
-            <option value="D">Curva D</option>
-            <option value="E">Curva E</option>
-            <option value="?">Sem curva</option>
-          </select>
+        <div class="fg" style="position:relative">
+          <div class="flbl">Curva</div>
+          <div class="status-dd-btn" id="curva-dd-btn" onclick="window.toggleCurvaDd&&window.toggleCurvaDd()">
+            <span id="curva-dd-label">Todas</span><span style="font-size:10px;opacity:.5;margin-left:4px">▾</span>
+          </div>
+          <div class="status-dd" id="curva-dd" style="display:none;min-width:140px">
+            <label class="sd-item" onclick="window.toggleCurvaOpt('ALL')">
+              <input type="checkbox" id="cd-ALL" checked onchange="window.applyCurvaFilter()">
+              <span>Todas</span>
+            </label>
+            <label class="sd-item" onclick="window.toggleCurvaOpt('A')">
+              <input type="checkbox" id="cd-A" onchange="window.applyCurvaFilter()">
+              <span style="color:var(--red)">■ Curva A 🚨</span>
+            </label>
+            <label class="sd-item" onclick="window.toggleCurvaOpt('B')">
+              <input type="checkbox" id="cd-B" onchange="window.applyCurvaFilter()">
+              <span style="color:var(--amber)">■ Curva B</span>
+            </label>
+            <label class="sd-item" onclick="window.toggleCurvaOpt('C')">
+              <input type="checkbox" id="cd-C" onchange="window.applyCurvaFilter()">
+              <span style="color:var(--green)">■ Curva C</span>
+            </label>
+            <label class="sd-item" onclick="window.toggleCurvaOpt('D')">
+              <input type="checkbox" id="cd-D" onchange="window.applyCurvaFilter()">
+              <span style="color:#8b5cf6">■ Curva D</span>
+            </label>
+            <label class="sd-item" onclick="window.toggleCurvaOpt('E')">
+              <input type="checkbox" id="cd-E" onchange="window.applyCurvaFilter()">
+              <span style="color:var(--text-dim)">■ Curva E</span>
+            </label>
+            <label class="sd-item" onclick="window.toggleCurvaOpt('?')">
+              <input type="checkbox" id="cd-X" onchange="window.applyCurvaFilter()">
+              <span>Sem curva</span>
+            </label>
+          </div>
         </div>
+        <input type="hidden" id="f-curva" value="">
         <div class="fg"><button class="btn btn-outline" onclick="window.resetFilters&&window.resetFilters()">✕ Limpar</button></div>
       </div>
       <div id="resumo-filtro" class="resumo-filtro" style="display:none"></div>
