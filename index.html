@@ -2131,6 +2131,8 @@ function dadosProdFiltrados(){
   const motivo=document.getElementById('pp-motivo')?.value||'';
   const status=document.getElementById('pp-status')?.value||'';
   const busca=document.getElementById('pp-busca')?.value.toLowerCase()||'';
+  const ppCurvas=APP.ppCurvaFiltros||[];
+  const hasCurvaABC=Object.keys(APP.curvaABC).length>0;
   return APP.produtos.filter(p=>{
     if(de||ate){ if(!mesInRange(p.mes,de,ate)) return false; }
     if(loja&&p.loja!==loja) return false;
@@ -2138,6 +2140,11 @@ function dadosProdFiltrados(){
     if(motivo&&p.motivo!==motivo) return false;
     if(status&&p.status!==status) return false;
     if(busca&&!p.descricao?.toLowerCase().includes(busca)) return false;
+    // Filtro de curva por produto individual
+    if(ppCurvas.length>0&&hasCurvaABC){
+      const cv=APP.curvaABC[String(p.cod_produto)]||'?';
+      if(!ppCurvas.includes(cv)) return false;
+    }
     return true;
   });
 }
@@ -2151,10 +2158,49 @@ function applyProdFilters(){
 }
 window.applyProdFilters = applyProdFilters;
 
+APP.ppCurvaFiltros = []; // curvas selecionadas na aba Produtos
+
+function togglePpCurvaDd(){
+  const dd=document.getElementById('pp-curva-dd');
+  if(dd) dd.style.display=dd.style.display==='none'?'block':'none';
+}
+window.togglePpCurvaDd=togglePpCurvaDd;
+
+function togglePpCurvaOpt(k){
+  if(k==='ALL'){
+    ['A','B','C','D','E','X'].forEach(c=>{const el=document.getElementById('ppc-'+c);if(el)el.checked=false;});
+    const a=document.getElementById('ppc-ALL');if(a)a.checked=true;
+  } else {
+    const a=document.getElementById('ppc-ALL');if(a)a.checked=false;
+    const anyChecked=['A','B','C','D','E','X'].some(c=>document.getElementById('ppc-'+c)?.checked);
+    if(!anyChecked){const a2=document.getElementById('ppc-ALL');if(a2)a2.checked=true;}
+  }
+  // Read all checked
+  const idMap={A:'A',B:'B',C:'C',D:'D',E:'E',X:'?'};
+  const sel=Object.entries(idMap).filter(([id])=>document.getElementById('ppc-'+id)?.checked).map(([,v])=>v);
+  APP.ppCurvaFiltros=sel;
+  const lbl=document.getElementById('pp-curva-label');
+  if(lbl) lbl.textContent=sel.length===0?'Todas':sel.length<=2?sel.map(c=>c==='?'?'S/curva':'Curva '+c).join('+'):sel.length+' curvas';
+  applyProdFilters();
+}
+window.togglePpCurvaOpt=togglePpCurvaOpt;
+
+// Close on outside click
+document.addEventListener('click',function(e){
+  const btn=document.getElementById('pp-curva-btn');
+  const dd=document.getElementById('pp-curva-dd');
+  if(btn&&dd&&!btn.contains(e.target)&&!dd.contains(e.target)) dd.style.display='none';
+});
+
 function resetProdFilters(){
   ['pp-periodo-de','pp-periodo-ate','pp-loja','pp-marca','pp-motivo','pp-status','pp-busca'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.value='';
   });
+  // Reset curva checkboxes
+  APP.ppCurvaFiltros=[];
+  ['ppc-A','ppc-B','ppc-C','ppc-D','ppc-E','ppc-X'].forEach(id=>{const el=document.getElementById(id);if(el)el.checked=false;});
+  const allEl=document.getElementById('ppc-ALL');if(allEl)allEl.checked=true;
+  const lbl=document.getElementById('pp-curva-label');if(lbl)lbl.textContent='Todas';
   updateProdPeriodLabel(); applyProdFilters();
 }
 window.resetProdFilters = resetProdFilters;
@@ -3830,6 +3876,21 @@ document.addEventListener('DOMContentLoaded', function(){
         </div>
         <div class="fg"><div class="flbl">Busca produto</div>
           <input type="text" id="pp-busca" placeholder="Nome do produto..." oninput="window.applyProdFilters&&window.applyProdFilters()" style="min-width:180px">
+        </div>
+        <div class="fg" style="position:relative">
+          <div class="flbl">Curva</div>
+          <div id="pp-curva-btn" onclick="window.togglePpCurvaDd&&window.togglePpCurvaDd()" style="display:flex;align-items:center;gap:6px;background:var(--bg2);border:1.5px solid var(--border);color:var(--text);border-radius:7px;padding:6px 10px;cursor:pointer;min-width:110px;font-size:13px;user-select:none;transition:border-color .15s">
+            <span id="pp-curva-label">Todas</span><span style="font-size:10px;opacity:.5;margin-left:auto">▾</span>
+          </div>
+          <div id="pp-curva-dd" style="display:none;position:absolute;top:calc(100% + 4px);right:0;z-index:400;background:var(--surface);border:1.5px solid var(--border2);border-radius:8px;padding:6px 0;min-width:150px;box-shadow:var(--shadow-lg)" onclick="event.stopPropagation()">
+            <div class="sd-item"><input type="checkbox" id="ppc-ALL" checked onchange="window.togglePpCurvaOpt('ALL')"><span>Todas</span></div>
+            <div class="sd-item"><input type="checkbox" id="ppc-A" onchange="window.togglePpCurvaOpt('A')"><span style="color:var(--red)">■ Curva A 🚨</span></div>
+            <div class="sd-item"><input type="checkbox" id="ppc-B" onchange="window.togglePpCurvaOpt('B')"><span style="color:var(--amber)">■ Curva B</span></div>
+            <div class="sd-item"><input type="checkbox" id="ppc-C" onchange="window.togglePpCurvaOpt('C')"><span style="color:var(--green)">■ Curva C</span></div>
+            <div class="sd-item"><input type="checkbox" id="ppc-D" onchange="window.togglePpCurvaOpt('D')"><span style="color:#8b5cf6">■ Curva D</span></div>
+            <div class="sd-item"><input type="checkbox" id="ppc-E" onchange="window.togglePpCurvaOpt('E')"><span style="color:var(--text-dim)">■ Curva E</span></div>
+            <div class="sd-item"><input type="checkbox" id="ppc-X" onchange="window.togglePpCurvaOpt('?')"><span>Sem curva</span></div>
+          </div>
         </div>
         <div class="fg"><button class="btn btn-outline" onclick="window.resetProdFilters&&window.resetProdFilters()">✕ Limpar</button></div>
       </div>
