@@ -2159,6 +2159,41 @@ function applyProdFilters(){
 window.applyProdFilters = applyProdFilters;
 
 APP.ppCurvaFiltros = []; // curvas selecionadas na aba Produtos
+APP.cvCurvaFiltros = []; // curvas selecionadas na aba Curva ABC
+
+function toggleCvCurvaDd(){
+  const dd=document.getElementById('cv-curva-dd');
+  if(dd) dd.style.display=dd.style.display==='none'?'block':'none';
+}
+window.toggleCvCurvaDd=toggleCvCurvaDd;
+
+function toggleCvCurvaOpt(k){
+  if(k==='ALL'){
+    ['A','B','C','D','E'].forEach(c=>{const el=document.getElementById('cvc-'+c);if(el)el.checked=false;});
+    const a=document.getElementById('cvc-ALL');if(a)a.checked=true;
+    APP.cvCurvaFiltros=[];
+  } else {
+    const a=document.getElementById('cvc-ALL');if(a)a.checked=false;
+    const anyChecked=['A','B','C','D','E'].some(c=>document.getElementById('cvc-'+c)?.checked);
+    if(!anyChecked){const a2=document.getElementById('cvc-ALL');if(a2)a2.checked=true;APP.cvCurvaFiltros=[];renderCurvaABC();return;}
+    APP.cvCurvaFiltros=['A','B','C','D','E'].filter(c=>document.getElementById('cvc-'+c)?.checked);
+  }
+  // Update label
+  const lbl=document.getElementById('cv-curva-label');
+  if(lbl) lbl.textContent=APP.cvCurvaFiltros.length===0?'Todas':
+    APP.cvCurvaFiltros.length<=2?APP.cvCurvaFiltros.map(c=>'Curva '+c).join('+'):APP.cvCurvaFiltros.length+' curvas';
+  // Sync hidden input (used by dadosCurvaFiltrados)
+  const inp=document.getElementById('cv-curva');
+  if(inp) inp.value=APP.cvCurvaFiltros.length===1?APP.cvCurvaFiltros[0]:'';
+  renderCurvaABC();
+}
+window.toggleCvCurvaOpt=toggleCvCurvaOpt;
+
+document.addEventListener('click',function(e){
+  const btn=document.getElementById('cv-curva-btn');
+  const dd=document.getElementById('cv-curva-dd');
+  if(btn&&dd&&!btn.contains(e.target)&&!dd.contains(e.target)) dd.style.display='none';
+});
 
 function togglePpCurvaDd(){
   const dd=document.getElementById('pp-curva-dd');
@@ -2385,6 +2420,7 @@ function renderProdTable(){
   else if(sortKey==='curva'){const cOrd={'A':0,'B':1,'C':2,'D':3,'E':4,'?':5};rows.sort((a,b)=>(cOrd[getCurva(a.cod_produto)]??5)-(cOrd[getCurva(b.cod_produto)]??5)||b.quantidade-a.quantidade);}
   else if(sortKey==='romaneio') rows.sort((a,b)=>+b.romaneio-+a.romaneio);
   else if(sortKey==='descricao') rows.sort((a,b)=>a.descricao?.localeCompare(b.descricao||'')||0);
+  else if(sortKey==='valor') rows.sort((a,b)=>(b.valor_romaneio||0)-(a.valor_romaneio||0));
   else if(sortKey==='loja') rows.sort((a,b)=>+a.loja-+b.loja);
 
   const total = rows.length;
@@ -2820,6 +2856,10 @@ function initCvPeriodSelects(){
 }
 
 function resetCvFilters(){
+  APP.cvCurvaFiltros=[];
+  ['cvc-A','cvc-B','cvc-C','cvc-D','cvc-E'].forEach(id=>{const el=document.getElementById(id);if(el)el.checked=false;});
+  const cvcAll=document.getElementById('cvc-ALL');if(cvcAll)cvcAll.checked=true;
+  const cvLbl=document.getElementById('cv-curva-label');if(cvLbl)cvLbl.textContent='Todas';
   ['cv-periodo-de','cv-periodo-ate','cv-curva','cv-marca','cv-motivo','cv-busca'].forEach(id=>{
     const el=document.getElementById(id);if(el)el.value='';
   });
@@ -2837,7 +2877,9 @@ document.addEventListener('click',function(e){
 function dadosCurvaFiltrados(){
   const de=document.getElementById('cv-periodo-de')?.value||'';
   const ate=document.getElementById('cv-periodo-ate')?.value||'';
-  const filtCurva=document.getElementById('cv-curva')?.value||'';
+  // Use multi-select array; fallback to hidden input value for single
+  const filtCurva=APP.cvCurvaFiltros?.length>0?APP.cvCurvaFiltros:
+    (document.getElementById('cv-curva')?.value?[document.getElementById('cv-curva').value]:[]);
   const filtMarca=document.getElementById('cv-marca')?.value||'';
   const filtMotivo=document.getElementById('cv-motivo')?.value||'';
   const filtBusca=(document.getElementById('cv-busca')?.value||'').toLowerCase();
@@ -2848,7 +2890,7 @@ function dadosCurvaFiltrados(){
     if(filtMarca&&p.marca_fornecedor!==filtMarca) return false;
     if(filtMotivo&&p.motivo!==filtMotivo) return false;
     const curva=getCurva(p.cod_produto);
-    if(filtCurva&&curva!==filtCurva) return false;
+    if(filtCurva.length>0&&!filtCurva.includes(curva)) return false;
     if(filtBusca&&!p.descricao?.toLowerCase().includes(filtBusca)) return false;
     return true;
   });
@@ -3937,6 +3979,7 @@ document.addEventListener('DOMContentLoaded', function(){
             <input type="text" id="prod-table-busca" placeholder="Buscar produto..." oninput="window.renderProdTable&&window.renderProdTable()" style="width:200px">
             <select id="prod-table-sort" onchange="window.renderProdTable&&window.renderProdTable()" style="font-size:12px">
               <option value="qtd">↓ Maior qtd</option>
+              <option value="valor">↓ Maior valor romaneio</option>
               <option value="curva">Por curva (A→E)</option>
               <option value="romaneio">↓ Romaneio</option>
               <option value="descricao">A-Z Produto</option>
@@ -3990,15 +4033,20 @@ document.addEventListener('DOMContentLoaded', function(){
               </div>
             </div>
           </div>
-          <div class="fg"><div class="flbl">Curva</div>
-            <select id="cv-curva" onchange="window.renderCurvaABC&&window.renderCurvaABC()">
-              <option value="">Todas (A+B+C)</option>
-              <option value="A">Curva A</option>
-              <option value="B">Curva B</option>
-              <option value="C">Curva C</option>
-              <option value="D">Curva D</option>
-              <option value="E">Curva E</option>
-            </select>
+          <div class="fg" style="position:relative">
+            <div class="flbl">Curva</div>
+            <div id="cv-curva-btn" onclick="window.toggleCvCurvaDd&&window.toggleCvCurvaDd()" style="display:flex;align-items:center;gap:6px;background:var(--bg2);border:1.5px solid var(--border);color:var(--text);border-radius:7px;padding:6px 10px;cursor:pointer;min-width:110px;font-size:13px;user-select:none;transition:border-color .15s">
+              <span id="cv-curva-label">Todas</span><span style="font-size:10px;opacity:.5;margin-left:auto">▾</span>
+            </div>
+            <div id="cv-curva-dd" style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:400;background:var(--surface);border:1.5px solid var(--border2);border-radius:8px;padding:6px 0;min-width:150px;box-shadow:var(--shadow-lg)" onclick="event.stopPropagation()">
+              <div class="sd-item"><input type="checkbox" id="cvc-ALL" checked onchange="window.toggleCvCurvaOpt('ALL')"><span>Todas</span></div>
+              <div class="sd-item"><input type="checkbox" id="cvc-A" onchange="window.toggleCvCurvaOpt('A')"><span style="color:var(--red)">■ Curva A 🚨</span></div>
+              <div class="sd-item"><input type="checkbox" id="cvc-B" onchange="window.toggleCvCurvaOpt('B')"><span style="color:var(--amber)">■ Curva B</span></div>
+              <div class="sd-item"><input type="checkbox" id="cvc-C" onchange="window.toggleCvCurvaOpt('C')"><span style="color:var(--green)">■ Curva C</span></div>
+              <div class="sd-item"><input type="checkbox" id="cvc-D" onchange="window.toggleCvCurvaOpt('D')"><span style="color:#8b5cf6">■ Curva D</span></div>
+              <div class="sd-item"><input type="checkbox" id="cvc-E" onchange="window.toggleCvCurvaOpt('E')"><span style="color:var(--text-dim)">■ Curva E</span></div>
+            </div>
+            <input type="hidden" id="cv-curva" value="">
           </div>
           <div class="fg"><div class="flbl">Marca</div>
             <select id="cv-marca" onchange="window.renderCurvaABC&&window.renderCurvaABC()" style="min-width:150px"><option value="">Todas</option></select>
