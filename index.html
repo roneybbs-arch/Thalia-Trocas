@@ -846,78 +846,7 @@ function renderDashboard() {
 APP.dashCurvaSel = null; // curva clicada: 'A','B','C','D','E' ou null
 
 function renderCurvaChart(){
-  const hasCurva = Object.keys(APP.curvaABC).length > 0;
-  const empty = document.getElementById('curva-prod-empty');
-  const btns  = document.getElementById('curva-btns');
-  const panel = document.getElementById('curva-prod-panel');
-  if(!hasCurva){
-    if(empty) empty.style.display='block';
-    if(btns)  btns.innerHTML='';
-    if(panel) panel.style.display='none';
-    return;
-  }
-  if(empty) empty.style.display='none';
-
-  const d = dadosDashFinal();
-  // Count & value by curva using produtos
-  const byCurva={A:{qtd:0,val:0,roms:new Set()},B:{qtd:0,val:0,roms:new Set()},
-                  C:{qtd:0,val:0,roms:new Set()},D:{qtd:0,val:0,roms:new Set()},
-                  E:{qtd:0,val:0,roms:new Set()},'?':{qtd:0,val:0,roms:new Set()}};
-
-  // Use produtos filtered by same romaneios as d
-  const romSet = new Set(d.map(x=>x.romaneio));
-  // Only use produtos if loaded — avoid blocking if not ready
-  const prodsD = APP.produtos.length>0 ? APP.produtos.filter(p=>romSet.has(p.romaneio)) : [];
-  prodsD.forEach(p=>{
-    const cv=getCurva(p.cod_produto);
-    if(!byCurva[cv]) byCurva[cv]={qtd:0,val:0,roms:new Set()};
-    byCurva[cv].qtd+=p.quantidade;
-    byCurva[cv].roms.add(p.romaneio);
-  });
-  // Add valor from romaneio data (use romaneio's curva predominante)
-  d.forEach(x=>{
-    const romProds=prodsD.filter(p=>p.romaneio===x.romaneio);
-    if(romProds.length===0) return;
-    const cv=getCurvaRom(x);
-    if(byCurva[cv]) byCurva[cv].val+=x.valor||0;
-  });
-
-  // Sync APP.dashCurvaSel with APP.dashSel.curva
-  APP.dashCurvaSel = APP.dashSel.curva;
-
-  const cvDef=[
-    {k:'A',label:'Curva A',bg:'var(--red-bg)',border:'var(--red-border)',color:'var(--red)',desc:'Mais relevantes'},
-    {k:'B',label:'Curva B',bg:'var(--amber-bg)',border:'var(--amber-border)',color:'var(--amber)',desc:'Relevância média'},
-    {k:'C',label:'Curva C',bg:'var(--green-bg)',border:'var(--green-border)',color:'var(--green)',desc:'Menor relevância'},
-    {k:'D',label:'Curva D',bg:'#f3e8ff',border:'#c4b5fd',color:'#8b5cf6',desc:'Baixo giro'},
-    {k:'E',label:'Curva E',bg:'var(--bg2)',border:'var(--border2)',color:'var(--text-dim)',desc:'Mínimo giro'},
-  ].filter(cv=>byCurva[cv.k]?.qtd>0);
-
-  const totalQtd = prodsD.reduce((a,b)=>a+b.quantidade,0)||1;
-
-  if(btns) btns.innerHTML = cvDef.map(cv=>{
-    const sel = APP.dashSel.curva===cv.k;
-    const v=byCurva[cv.k];
-    const pct=(v.qtd/totalQtd*100).toFixed(1);
-    return `<div class="curva-card ${sel?'curva-card-sel':''}"
-      style="background:${sel?cv.bg:'var(--surface2)'};border:2px solid ${sel?cv.border:'var(--border)'};border-radius:10px;padding:10px 14px;cursor:pointer;min-width:110px;transition:all .2s"
-      onclick="window.clickCurvaCard('${cv.k}')">
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-        <span class="curva-badge curva-${cv.k}">${cv.k}</span>
-        <span style="font-size:11px;font-weight:600;color:${sel?cv.color:'var(--text-mid)'}">${cv.label}</span>
-      </div>
-      <div style="font-family:var(--mono);font-size:18px;font-weight:700;color:${sel?cv.color:'var(--text)'}">${v.qtd.toLocaleString('pt-BR')}</div>
-      <div style="font-size:10px;color:${sel?cv.color:'var(--text-dim)'}">${pct}% · ${v.roms.size} rom.</div>
-      <div style="margin-top:6px;height:3px;background:var(--border);border-radius:2px;overflow:hidden">
-        <div style="height:100%;width:${pct}%;background:${cv.color};transition:width .4s"></div>
-      </div>
-    </div>`;
-  }).join('');
-
-  const selCv = APP.dashSel.curva;
-  const cvPanel = document.getElementById('curva-prod-panel');
-  if(cvPanel) cvPanel.style.display = selCv ? 'block' : 'none';
-  if(selCv) renderCurvaProdPanel(selCv, prodsD, byCurva);
+  // Removido do dashboard — use aba Produtos → Curva ABC
 }
 window.renderCurvaChart = renderCurvaChart;
 
@@ -1069,18 +998,7 @@ function renderDashDrillDown(d) {
   }
 
     // ── RIGHT: product ranking ────────────────────────────────
-  const romSet2=new Set(d.map(x=>x.romaneio));
-  const prodsD2=APP.produtos.filter(p=>romSet2.has(p.romaneio));
-  const byProd={};
-  prodsD2.forEach(p=>{
-    const k=String(p.cod_produto)+'|'+p.descricao;
-    if(!byProd[k])byProd[k]={cod:String(p.cod_produto),desc:p.descricao,qtd:0,roms:new Set(),marca:p.marca_fornecedor||p.marca_produto||''};
-    byProd[k].qtd+=p.quantidade; byProd[k].roms.add(p.romaneio);
-  });
-  const topProds=Object.values(byProd).sort((a,b)=>b.qtd-a.qtd).slice(0,20);
-  const totalQtd=prodsD2.reduce((a,b)=>a+b.quantidade,0);
-  const maxQ=topProds[0]?.qtd||1;
-  const totalSKUs=Object.keys(byProd).length;
+  // produto processing removed from dashboard
 
   const rightEl=document.getElementById('drill-right-body');
   if(rightEl) rightEl.innerHTML=topProds.length===0
@@ -1410,7 +1328,7 @@ function renderTable(){
         <td class="td-loja">${d.loja}</td>
         <td class="td-marca" title="${d.marca}">${d.marca}</td>
         <td class="td-rom">${d.romaneio}</td>
-        <td style="text-align:center">${(()=>{const cv=getCurvaRom(d);return cv==='?'?'<span style="color:var(--border2);font-size:10px">—</span>':`<span class="curva-badge curva-${cv}">${cv}</span>`;})()}</td>
+        <td></td>
         <td><span class="bm bm-${d.motivo}">${d.motivo}</span></td>
         <td class="td-val ${vc}">${fmtN(d.valor)}</td>
         <td><select class="ss ss-${d.status}" onchange="updStatus('${d._docId}',this.value,this)">${o}</select></td>
@@ -1425,7 +1343,7 @@ function renderTable(){
         <td class="td-loja">${d.loja}</td>
         <td class="td-marca" title="${d.marca}">${d.marca}</td>
         <td class="td-rom">${d.romaneio}</td>
-        <td style="text-align:center">${(()=>{const cv=getCurvaRom(d);return cv==='?'?'<span style="color:var(--border2);font-size:10px">—</span>':`<span class="curva-badge curva-${cv}">${cv}</span>`;})()}</td>
+        <td></td>
         <td><span class="bm bm-${d.motivo}">${d.motivo}</span></td>
         <td class="td-val ${vc}">${fmtN(d.valor)}</td>
         <td><span class="ss ss-${d.status}" style="pointer-events:none">${oLbl[d.status]||d.status}</span></td>
@@ -4268,7 +4186,6 @@ document.addEventListener('DOMContentLoaded', function(){
           <table><thead><tr>
             <th onclick="sortBy('mes')">Mês</th><th onclick="sortBy('loja')">Loja</th>
             <th onclick="sortBy('marca')">Marca</th><th onclick="sortBy('romaneio')">Romaneio</th>
-            <th style="width:52px;text-align:center">Curva</th>
             <th onclick="sortBy('motivo')">Motivo</th><th onclick="sortBy('valor')">Valor R$</th>
             <th>Status</th><th>Comprador</th><th id="th-edit" style="width:30px"></th><th id="th-del" style="width:30px"></th>
           </tr></thead>
