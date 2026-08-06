@@ -1700,6 +1700,48 @@ async function salvarEdicao(docId){
   }
 }
 
+async function excluirFiltrados(){
+  const total = APP.filtrados.length;
+  if(!total){ toast('Nenhum registro filtrado','orange'); return; }
+  if(!confirm(`⚠️ Excluir ${total} registros filtrados permanentemente?
+
+Esta ação não pode ser desfeita.
+
+Certifique-se que os filtros estão corretos antes de confirmar.`)) return;
+
+  setLoading(true, `Excluindo ${total} registros...`);
+  try {
+    const BATCH_SIZE = 400;
+    const items = [...APP.filtrados];
+    let deleted = 0;
+
+    for(let i = 0; i < items.length; i += BATCH_SIZE){
+      const batch = writeBatch(db);
+      items.slice(i, i + BATCH_SIZE).forEach(d => {
+        if(d._docId) batch.delete(doc(db, 'romaneios', d._docId));
+      });
+      await batch.commit();
+      deleted += Math.min(BATCH_SIZE, items.length - i);
+      setLoading(true, `Excluindo... ${deleted}/${total}`);
+    }
+
+    // Remove from local state
+    const deletedIds = new Set(items.map(d => d._docId).filter(Boolean));
+    APP.dados = APP.dados.filter(d => !deletedIds.has(d._docId));
+    APP.filtrados = [];
+
+    setLoading(false);
+    toast(`✅ ${total} registros excluídos com sucesso`, 'green');
+    populateMesSelects(); initFilters(); initDashFilters();
+    APP.filtrados = [...dadosAtivos()];
+    applyFilters(); renderDashboard(); renderStatusStrip();
+  } catch(e) {
+    setLoading(false);
+    toast('❌ Erro ao excluir: ' + e.message, 'red');
+  }
+}
+window.excluirFiltrados = excluirFiltrados;
+
 async function excluirRegistro(docId){
   if(!confirm('Excluir este registro? Você poderá desfazer logo em seguida se necessário.')) return;
   const item=APP.dados.find(d=>d._docId===docId);
@@ -3099,7 +3141,7 @@ window.drillRowClick = function(idx){
 
 Object.assign(window,{showTab,filtrarMes,applyFilters,resetFilters,sortBy,setChip,toggleTheme,dashClick,dashClearSel,renderDashDrillDown,renderCurvaChart,clickCurvaCard,clearCurvaClick,renderCurvaProdPanel,renderMarcasChart,filtrarMarcasChart,pushHistorico,updateUndoBtn,desfazerUltimo,revertEntry,abrirHistorico,fecharHistorico,renderHistoricoPanel,
   marcarFiltrados,renderPicker,selMarca,copiarExtracao,handleXlsx,importarPaste,
-  renderHistorico,remMes,excluirRegistro,exportarCSV,exportarExcel,exportarTXT,
+  renderHistorico,remMes,excluirRegistro,excluirFiltrados,exportarCSV,exportarExcel,exportarTXT,
   toggleExportDd,abrirNovoRomaneio,fecharNovoRomaneio,salvarNovoRomaneio,
   fazerLogin,fazerLogout,seedDadosIniciais,goP,
   toggleStatusDd,toggleStatusOpt,applyStatusFilter,abrirEdicao,fecharEdicao,salvarEdicao});
@@ -4179,6 +4221,8 @@ document.addEventListener('DOMContentLoaded', function(){
               <button class="btn btn-sm btn-outline" style="color:var(--cyan);border-color:var(--cyan)" onclick="marcarFiltrados('AG_RETIRADA')">🕐 Ag. Retirada</button>
               <button class="btn btn-sm btn-outline" style="color:var(--green);border-color:var(--green)" onclick="marcarFiltrados('RETIRADO')">✅ Retirado</button>
               <button class="btn btn-sm btn-outline" style="color:var(--orange);border-color:var(--orange)" onclick="marcarFiltrados('DESCARTE')">🗑 Descarte</button>
+              <div style="width:1px;height:20px;background:var(--border);margin:0 2px"></div>
+              <button class="btn btn-sm btn-outline" style="color:var(--red);border-color:var(--red)" data-role="admin" onclick="window.excluirFiltrados&&window.excluirFiltrados()">🗑 Excluir filtrados</button>
             </div>
           </div>
         </div>
