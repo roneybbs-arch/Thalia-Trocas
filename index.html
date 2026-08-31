@@ -1328,7 +1328,6 @@ function renderTable(){
         <td class="td-loja">${d.loja}</td>
         <td class="td-marca" title="${d.marca}">${d.marca}</td>
         <td class="td-rom">${d.romaneio}</td>
-        <td></td>
         <td><span class="bm bm-${d.motivo}">${d.motivo}</span></td>
         <td class="td-val ${vc}">${fmtN(d.valor)}</td>
         <td><select class="ss ss-${d.status}" onchange="updStatus('${d._docId}',this.value,this)">${o}</select></td>
@@ -1343,7 +1342,6 @@ function renderTable(){
         <td class="td-loja">${d.loja}</td>
         <td class="td-marca" title="${d.marca}">${d.marca}</td>
         <td class="td-rom">${d.romaneio}</td>
-        <td></td>
         <td><span class="bm bm-${d.motivo}">${d.motivo}</span></td>
         <td class="td-val ${vc}">${fmtN(d.valor)}</td>
         <td><span class="ss ss-${d.status}" style="pointer-events:none">${oLbl[d.status]||d.status}</span></td>
