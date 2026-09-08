@@ -1468,20 +1468,65 @@ function parseStatusImport(sit,col7){
 function processarLinhas(raw,mes,acao,logId){
   const log=document.getElementById(logId); let ok=0,skip=0;
   let startRow=0;
-  if(raw.length>0){const f=String(raw[0][0]||'').toUpperCase().trim();if(f==='LOJA'||isNaN(Number(f)))startRow=1;}
+  const header=raw[0]?raw[0].map(c=>String(c||'').toUpperCase().trim()):[];
+  if(header.length>0&&(header[0]==='LOJA'||isNaN(Number(header[0]))))startRow=1;
+
+  // Detect column positions from header
+  const colIdx=(names)=>{ for(const n of names){const i=header.findIndex(h=>h.includes(n));if(i>=0)return i;} return -1; };
+  let iLoja=colIdx(['LOJA']), iMarca=colIdx(['MARCA']), iRom=colIdx(['ROMANEIO','ROM']);
+  let iValor=colIdx(['VALOR']), iMotivo=colIdx(['MOTIVO']), iSit=colIdx(['SITUAÇÃO','SITUACAO','SIT']);
+  let iCol7=colIdx(['OBS','COMPRADOR','COL7']);
+  let iData=colIdx(['DATA']);
+
+  // Fallback: no header detected — use positional based on column count
+  if(iLoja<0){
+    const ncols=raw[startRow]?raw[startRow].length:5;
+    if(ncols===5){
+      // LOJA MARCA ROMANEIO MOTIVO VALOR (new format)
+      const h3=String(raw[startRow]?.[3]||'');
+      const h4=String(raw[startRow]?.[4]||'');
+      const isH4Num=!isNaN(parseFloat(h4.replace(',','.')));
+      if(isH4Num||h3.toUpperCase().includes('DANIF')||h3.toUpperCase().includes('VENC')){
+        iLoja=0;iMarca=1;iRom=2;iMotivo=3;iValor=4;iSit=-1;iCol7=-1;
+      } else {
+        iLoja=0;iMarca=1;iRom=2;iValor=3;iMotivo=4;iSit=5;iCol7=6;
+      }
+    } else {
+      iLoja=0;iMarca=1;iRom=2;iValor=3;iMotivo=4;iSit=5;iCol7=6;
+    }
+  } else {
+    // Header found — if valor/motivo not found, guess from remaining cols
+    if(iValor<0&&iMotivo>=0) iValor=header.findIndex((h,i)=>i>2&&i!==iMotivo&&i!==iSit&&i!==iCol7&&h!=='');
+    if(iMotivo<0&&iValor>=0) iMotivo=header.findIndex((h,i)=>i>2&&i!==iValor&&i!==iSit&&i!==iCol7&&h!=='');
+    // Detect swapped: if col at iValor has text and iMotivo has numbers
+    if(iValor>=0&&iMotivo>=0&&startRow<raw.length){
+      const sampleV=String(raw[startRow]?.[iValor]||'');
+      const sampleM=String(raw[startRow]?.[iMotivo]||'');
+      if(isNaN(parseFloat(sampleV.replace(',','.').replace(/[^0-9.]/g,'')))&&!isNaN(parseFloat(sampleM.replace(',','.')))){
+        [iValor,iMotivo]=[iMotivo,iValor]; // swap
+      }
+    }
+  }
+
   const novosDados=[];
   for(let i=startRow;i<raw.length;i++){
-    const row=raw[i];if(!row||row.every(c=>String(c).trim()===''))continue;
+    const row=raw[i];if(!row||row.every(c=>String(c||'').trim()===''))continue;
     const c0=String(row[0]||'').trim().toLowerCase();if(c0==='total'||c0==='loja'||c0==='')continue;
-    const loja=String(row[0]||'').trim();const marca=String(row[1]||'').trim().toUpperCase();
-    const romaneio=String(row[2]||'').trim();
-    const valor=parseFloat(String(row[3]||0).replace(',','.').replace(/[^0-9.]/g,''))||0;
-    const motivo=String(row[4]||'').trim().toUpperCase().replace(/\s+/,' ');
-    const mN=['VALIDADE','DANIFICADO','ALTERADO'].includes(motivo)?motivo:motivo.startsWith('VALIDADE')?'VALIDADE':motivo.startsWith('DANIFICADO')?'DANIFICADO':motivo.startsWith('ALTERADO')?'ALTERADO':'DANIFICADO';
+    const loja=String(row[iLoja>=0?iLoja:0]||'').trim();
+    const marca=String(row[iMarca>=0?iMarca:1]||'').trim().toUpperCase();
+    const romaneio=String(row[iRom>=0?iRom:2]||'').trim();
+    const valorRaw=iValor>=0?String(row[iValor]||0):String(row[3]||0);
+    const valor=parseFloat(valorRaw.toString().replace(',','.').replace(/[^0-9.]/g,''))||0;
+    const motivoRaw=iMotivo>=0?String(row[iMotivo]||''):String(row[4]||'');
+    const motivo=motivoRaw.trim().toUpperCase().replace(/\s+/,' ');
+    // Normalize motivo
+    const mN=motivo.includes('VALIDADE')||motivo.includes('VENCIDO')||motivo.includes('VENCIDOS')?'VALIDADE':
+              motivo.includes('DANIFICADO')||motivo.includes('DANIFICADOS')?'DANIFICADO':
+              motivo.includes('ALTERADO')?'ALTERADO':
+              ['VALIDADE','DANIFICADO','ALTERADO'].includes(motivo)?motivo:'DANIFICADO';
     if(!loja||!marca||!romaneio){skip++;continue;}
-    const hasData=raw[0]&&String(raw[0][5]||'').toUpperCase().includes('DATA');
-    const sit=hasData?String(row[6]||'').trim():String(row[5]||'').trim();
-    const col7=hasData?String(row[7]||'').trim():String(row[6]||'').trim();
+    const sit=iSit>=0?String(row[iSit]||'').trim():'';
+    const col7=iCol7>=0?String(row[iCol7]||'').trim():iData>=0?String(row[iData+1]||'').trim():'';
     const [status,comprador]=parseStatusImport(sit,col7);
     novosDados.push({mes,loja,marca,romaneio,valor:Math.round(valor*100)/100,motivo:mN,comprador:comprador.replace(/\/ ?RETIRADO/i,'').trim(),obs:'',status});
     ok++;
@@ -4211,7 +4256,7 @@ document.addEventListener('DOMContentLoaded', function(){
               </div>
             </div>
             <div style="width:1px;height:20px;background:var(--border);margin:0 2px"></div>
-            <button class="btn btn-sm btn-amber" data-role="admin,editor" onclick="window.abrirNovoRomaneio&&window.abrirNovoRomaneio()">＋ Novo Romaneio</button>
+            <button class="btn btn-sm btn-amber" data-role="admin,editor" onclick="window.abrirNovoRomaneio&&window.abrirNovoRomaneio()" title="Novo Romaneio (Ctrl+N)">＋ Novo Romaneio</button>
             <div style="width:1px;height:20px;background:var(--border);margin:0 2px" data-role="admin,editor"></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap" data-role="admin,editor">
               <button class="btn btn-sm btn-blue" onclick="marcarFiltrados('EXTRAÍDO')">📤 Extraído</button>
