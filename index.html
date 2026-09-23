@@ -354,6 +354,7 @@ async function carregarDados() {
     // Carrega produtos em segundo plano silenciosamente
     loadProdutosSilent();
     carregarCurva();
+    loadCustosSilent();
   } catch(e) {
     setLoading(false);
     toast('❌ Erro ao carregar dados: ' + e.message, 'red');
@@ -2317,10 +2318,16 @@ function renderProdDashboard(){
   const totalRom = new Set(d.map(p=>p.romaneio)).size;
   const totalProd = new Set(d.map(p=>p.cod_produto)).size;
   const totalMarcas = new Set(d.map(p=>p.marca_fornecedor)).size;
-  const totalValor = [...new Set(d.map(p=>p.romaneio))].reduce((acc,rom)=>{
-    const p = d.find(x=>x.romaneio===rom);
-    return acc + (p?.valor_romaneio||0);
+  // Valor real = custo × quantidade (quando custo disponível)
+  const totalValorCusto = d.reduce((acc,p)=>{
+    const c=getCusto(p.cod_produto);
+    return acc + (c>0 ? c*p.quantidade : 0);
   },0);
+  const totalValor = totalValorCusto > 0 ? totalValorCusto :
+    [...new Set(d.map(p=>p.romaneio))].reduce((acc,rom)=>{
+      const p = d.find(x=>x.romaneio===rom);
+      return acc + (p?.valor_romaneio||0);
+    },0);
   const maisProblema = Object.entries(d.reduce((a,p)=>{a[p.descricao]=(a[p.descricao]||0)+p.quantidade;return a;},{}))
     .sort((a,b)=>b[1]-a[1])[0];
 
@@ -2329,7 +2336,7 @@ function renderProdDashboard(){
     <div class="kpi c-blue"><div class="kpi-label">Romaneios</div><div class="kpi-val">${totalRom.toLocaleString('pt-BR')}</div><div class="kpi-sub">com produtos</div></div>
     <div class="kpi c-purple"><div class="kpi-label">Produtos distintos</div><div class="kpi-val">${totalProd.toLocaleString('pt-BR')}</div><div class="kpi-sub">SKUs únicos</div></div>
     <div class="kpi c-green"><div class="kpi-label">Marcas envolvidas</div><div class="kpi-val">${totalMarcas}</div><div class="kpi-sub">fornecedores</div></div>
-    <div class="kpi c-amber"><div class="kpi-label">Valor dos romaneios</div><div class="kpi-val">${fmt(totalValor)}</div><div class="kpi-sub">valor total envolvido</div></div>
+    <div class="kpi c-amber"><div class="kpi-label">Valor (custo)</div><div class="kpi-val">${fmt(totalValor)}</div><div class="kpi-sub">${totalValorCusto>0?"preço fábrica":"valor romaneio"}</div></div>
     <div class="kpi c-red"><div class="kpi-label">Produto problemático</div><div class="kpi-val" style="font-size:12px;word-break:break-word">${maisProblema?maisProblema[0].substring(0,28)+'...':'—'}</div><div class="kpi-sub">${maisProblema?maisProblema[1]+' unidades':''}</div></div>
   `;
 
@@ -2428,7 +2435,10 @@ function renderProdTable(){
 
   const total = rows.length;
   const totalQtd = rows.reduce((a,b)=>a+b.quantidade,0);
-  document.getElementById('prod-table-info').innerHTML=`<strong>${total.toLocaleString('pt-BR')}</strong> linhas &nbsp;·&nbsp; <strong>${totalQtd.toLocaleString('pt-BR')}</strong> unidades`;
+  const vlrTotal=slice.reduce((a,p)=>{const c=getCusto(p.cod_produto);return a+(c>0?c*p.quantidade:0);},0);
+  const vlrTotalAll=rows.reduce((a,p)=>{const c=getCusto(p.cod_produto);return a+(c>0?c*p.quantidade:0);},0);
+  document.getElementById('prod-table-info').innerHTML=`<strong>${total.toLocaleString('pt-BR')}</strong> linhas &nbsp;·&nbsp; <strong>${totalQtd.toLocaleString('pt-BR')}</strong> unidades`+
+    (vlrTotalAll>0?` &nbsp;·&nbsp; <strong style="color:var(--red)">${fmt(vlrTotalAll)}</strong> custo total`:'');
 
   const start=(APP.prodPage-1)*PROD_PER;
   const slice=rows.slice(start,start+PROD_PER);
@@ -2439,6 +2449,8 @@ function renderProdTable(){
   document.getElementById('prod-table-body').innerHTML=slice.map(p=>{
     const cv=getCurva(p.cod_produto);
     const cvBadge=cv==='?'?'<span style="color:var(--border2);font-size:10px">—</span>':`<span class="curva-badge curva-${cv}">${cv}</span>`;
+    const custo=getCusto(p.cod_produto);
+    const vlrProd=custo>0?custo*p.quantidade:0;
     return `<tr>
       <td class="td-mes">${p.mes||'-'}</td>
       <td class="td-loja">${p.loja}</td>
@@ -2447,9 +2459,10 @@ function renderProdTable(){
       <td style="text-align:center">${cvBadge}</td>
       <td style="font-size:11px;color:var(--text-mid)">${p.marca_fornecedor||p.marca_produto||'-'}</td>
       <td style="font-family:var(--mono);font-weight:600;color:var(--amber)">${p.quantidade}</td>
+      <td class="td-val">${custo>0?fmtN(custo):'<span style="color:var(--text-dim);font-size:10px">—</span>'}</td>
+      <td class="td-val" style="color:${vlrProd>0?'var(--red)':'var(--text-dim)'};font-weight:${vlrProd>0?'600':'400'}">${vlrProd>0?fmtN(vlrProd):'—'}</td>
       <td><span class="bm ${mC[p.motivo]||''}">${p.motivo}</span></td>
       <td><span style="font-size:10px;font-family:var(--mono);color:${stCor[p.status]||'var(--text-dim)'}">${p.status}</span></td>
-      <td class="td-val val-l">${fmtN(p.valor_romaneio||0)}</td>
     </tr>`;
   }).join('');
 
@@ -2639,6 +2652,24 @@ async function salvarCurvaFirestore(novo,qtd,dataRef){
 }
 
 APP.curvaABC = {};       // { cod_produto: 'A'|'B'|'C' }
+APP.custoABC = {};        // { cod_produto: preco_fabrica }
+
+async function loadCustosSilent(){
+  if(Object.keys(APP.custoABC).length > 0) return;
+  try{
+    const resp = await fetch('custos.json');
+    if(!resp.ok) return;
+    APP.custoABC = await resp.json();
+    console.log('Custos carregados:', Object.keys(APP.custoABC).length);
+    // Re-render if produtos tab open
+    if(document.getElementById('subpanel-produtos')?.style.display !== 'none') applyProdFilters();
+  }catch(e){ /* silencioso */ }
+}
+window.loadCustosSilent = loadCustosSilent;
+
+function getCusto(cod){
+  return APP.custoABC[String(cod)] || 0;
+}
 APP.curvaImportadaEm = null;
 APP.curvaQtd = 0;
 APP.cvPage = 1;
@@ -3994,7 +4025,8 @@ document.addEventListener('DOMContentLoaded', function(){
           <table><thead><tr>
             <th>Mês</th><th>Loja</th><th>Romaneio</th>
             <th>Produto</th><th>Curva</th><th>Marca</th><th>Qtd</th>
-            <th>Motivo</th><th>Status</th><th>Vlr Romaneio</th>
+            <th>Custo Unit.</th><th>Vlr Produto</th>
+            <th>Motivo</th><th>Status</th>
           </tr></thead>
           <tbody id="prod-table-body"></tbody></table>
         </div>
