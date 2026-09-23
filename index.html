@@ -2435,7 +2435,6 @@ function renderProdTable(){
 
   const total = rows.length;
   const totalQtd = rows.reduce((a,b)=>a+b.quantidade,0);
-  const vlrTotal=slice.reduce((a,p)=>{const c=getCusto(p.cod_produto);return a+(c>0?c*p.quantidade:0);},0);
   const vlrTotalAll=rows.reduce((a,p)=>{const c=getCusto(p.cod_produto);return a+(c>0?c*p.quantidade:0);},0);
   document.getElementById('prod-table-info').innerHTML=`<strong>${total.toLocaleString('pt-BR')}</strong> linhas &nbsp;·&nbsp; <strong>${totalQtd.toLocaleString('pt-BR')}</strong> unidades`+
     (vlrTotalAll>0?` &nbsp;·&nbsp; <strong style="color:var(--red)">${fmt(vlrTotalAll)}</strong> custo total`:'');
