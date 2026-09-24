@@ -3255,6 +3255,51 @@ async function sincronizarProdutos(){
 }
 window.sincronizarProdutos = sincronizarProdutos;
 
+function exportarRomaneiosSemProdutos(){
+  if(!APP.dados.length){
+    toast('Carregue os dados primeiro','orange'); return;
+  }
+  const romsProdutos = new Set(APP.produtos.map(p => String(p.romaneio)));
+  const faltando = APP.dados.filter(d => !romsProdutos.has(String(d.romaneio)));
+  if(!faltando.length){
+    toast('Todos os romaneios já têm produtos!','green'); return;
+  }
+  // Group by mes
+  const byMes = {};
+  faltando.forEach(d => {
+    if(!byMes[d.mes]) byMes[d.mes] = [];
+    byMes[d.mes].push(d.romaneio);
+  });
+  // Build SQL IN clause
+  const nums = faltando.map(d => d.romaneio).join(',');
+  const sql = 'WHERE SEA_P.SAIDA_ESTOQUE IN (' + nums + ')';
+  // Also build summary
+  const resumo = Object.entries(byMes).sort(([a],[b])=>a.localeCompare(b))
+    .map(([m,roms]) => m+': '+roms.length+' romaneios').join(' | ');
+  // Copy to clipboard
+  navigator.clipboard.writeText(sql).then(()=>{
+    toast('✅ '+faltando.length+' romaneios copiados! Cole no seu SQL.','green');
+  }).catch(()=>{
+    // Fallback: show in textarea
+    const ta = document.createElement('textarea');
+    ta.value = sql;
+    ta.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:80%;height:200px;z-index:9999;padding:10px;font-size:12px;font-family:monospace';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    toast('✅ Copiado! '+resumo,'green');
+  });
+  // Update log
+  const log = document.getElementById('sinc-log');
+  if(log) log.innerHTML = '<span class="log-ok">📋 '+faltando.length+' romaneios sem produtos</span><br>'
+    + '<span style="color:var(--text-dim)">'+resumo+'</span><br>'
+    + '<span class="log-ok">✅ SQL copiado para a área de transferência!</span><br>'
+    + '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:11px;color:var(--amber)">Ver SQL completo</summary>'
+    + '<textarea style="width:100%;height:80px;font-size:10px;font-family:monospace;margin-top:4px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px">'+sql+'</textarea></details>';
+}
+window.exportarRomaneiosSemProdutos = exportarRomaneiosSemProdutos;
+
 window.drillRowClick = function(idx){
   const row = window._drillRows && window._drillRows[idx];
   if(row) window.dashClick(row.dim, row.val);
@@ -4425,8 +4470,9 @@ document.addEventListener('DOMContentLoaded', function(){
         <div class="import-card full" data-role="admin">
           <h2>🔄 Sincronizar Produtos com Romaneios</h2>
           <p>Gera automaticamente registros de produto para os romaneios que ainda não têm produtos vinculados. Usa os dados já existentes no <strong>produtos.json</strong> cruzando com os romaneios do Firebase. Para meses sem produto no arquivo, cria um registro genérico com a marca do romaneio.</p>
-          <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px">
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
             <button class="btn btn-amber" onclick="window.sincronizarProdutos&&window.sincronizarProdutos()">🔄 Sincronizar agora</button>
+            <button class="btn btn-outline" onclick="window.exportarRomaneiosSemProdutos&&window.exportarRomaneiosSemProdutos()">📋 Copiar romaneios faltantes (SQL)</button>
             <span id="sinc-status" style="font-size:12px;color:var(--text-dim)"></span>
           </div>
           <div class="import-log" id="sinc-log">Aguardando...</div>
