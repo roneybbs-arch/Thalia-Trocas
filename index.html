@@ -2493,6 +2493,7 @@ function handleProdXlsx(evt){
   const mes=document.getElementById('prod-import-mes')?.value||'';
   const acao=document.getElementById('prod-import-acao')?.value||'adicionar';
   const log=document.getElementById('prod-import-log');
+  const mesAuto = mes === 'AUTO';
   if(!mes){if(log)log.innerHTML='<span class="log-err">❌ Selecione o mês de referência.</span>';return;}
   if(log) log.innerHTML='<span style="color:var(--text-dim)">Lendo arquivo...</span>';
   const reader=new FileReader();
@@ -2529,7 +2530,7 @@ function handleProdXlsx(evt){
           quantidade:qtd,
           marca_produto:marcaProd,
           loja:romData.loja||String(empresa||''),
-          mes:romData.mes||mes,
+          mes:romData.mes||(mesAuto?'':mes),
           marca_fornecedor:romData.marca||'',
           motivo:romData.motivo||'',
           valor_romaneio:romData.valor||0,
@@ -2539,12 +2540,13 @@ function handleProdXlsx(evt){
         ok++;
       }
       // Remove existing if substituir
-      if(acao==='substituir'){
+      if(acao==='substituir'&&!mesAuto){
         APP.produtos=APP.produtos.filter(p=>p.mes!==mes);
       }
       APP.produtos=[...APP.produtos,...novos];
       // Reload firebase if needed (optional — just update local)
-      if(log) log.innerHTML=`<span class="log-ok">✅ ${ok.toLocaleString('pt-BR')} produtos importados → ${mes}</span>`+
+      const mesInfo = mesAuto ? 'mês automático ('+[...new Set(novos.map(n=>n.mes).filter(Boolean))].sort().join(', ')+')' : mes;
+      if(log) log.innerHTML='<span class="log-ok">✅ '+ok.toLocaleString('pt-BR')+' produtos importados → '+mesInfo+'</span>'+
         (skip>0?`
 <span class="log-warn">⚠ ${skip} linhas ignoradas</span>`:'')+
         (noMatch>0?`
@@ -2553,7 +2555,7 @@ function handleProdXlsx(evt){
       initProdFilters();
       applyProdFilters();
       document.getElementById('cnt-produtos').textContent=APP.produtos.length.toLocaleString('pt-BR');
-      toast('✅ '+ok.toLocaleString('pt-BR')+' produtos importados → '+mes,'green');
+      toast('✅ '+ok.toLocaleString('pt-BR')+' produtos importados','green');
     }catch(err){
       if(log) log.innerHTML=`<span class="log-err">❌ Erro: ${err.message}</span>`;
     }
@@ -4486,6 +4488,7 @@ document.addEventListener('DOMContentLoaded', function(){
             <div class="fg">
               <div class="flbl">Mês de Referência</div>
               <select id="prod-import-mes" style="width:100%">
+                <option value="AUTO">🔄 Automático (mês do romaneio)</option>
                 <option value="AGO/2025">AGO/2025</option><option value="SET/2025">SET/2025</option>
                 <option value="OUT/2025">OUT/2025</option><option value="NOV/2025">NOV/2025</option>
                 <option value="DEZ/2025">DEZ/2025</option><option value="JAN/2026">JAN/2026</option>
