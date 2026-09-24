@@ -3207,6 +3207,54 @@ document.addEventListener('click',function(e){
   if(btn&&dd&&!btn.contains(e.target)&&!dd.contains(e.target)) dd.style.display='none';
 });
 
+// ══ SINCRONIZAR PRODUTOS COM ROMANEIOS ══
+async function sincronizarProdutos(){
+  const log = document.getElementById('sinc-log');
+  const status = document.getElementById('sinc-status');
+  if(!APP.dados.length){
+    if(log) log.textContent = 'Carregue os dados primeiro.';
+    return;
+  }
+  const romsProdutos = new Set(APP.produtos.map(p => String(p.romaneio)));
+  const romsMissing = APP.dados.filter(d => !romsProdutos.has(String(d.romaneio)));
+  const byMes = {};
+  romsMissing.forEach(d => { byMes[d.mes] = (byMes[d.mes]||0) + 1; });
+  const mesInfo = Object.entries(byMes).sort().map(([m,n])=>m+': '+n).join(' | ');
+  if(log) log.innerHTML =
+    '<span class="log-ok">Total Firebase: '+APP.dados.length.toLocaleString('pt-BR')+'</span><br>' +
+    '<span class="log-ok">Com produtos: '+APP.produtos.length.toLocaleString('pt-BR')+'</span><br>' +
+    '<span class="log-warn">Sem produtos: '+romsMissing.length.toLocaleString('pt-BR')+'</span><br>' +
+    (mesInfo ? '<span style="color:var(--text-dim)">'+mesInfo+'</span>' : '');
+  if(!romsMissing.length){
+    if(log) log.innerHTML += '<br><span class="log-ok">✅ Todos os romaneios já têm produtos!</span>';
+    return;
+  }
+  if(!confirm('Criar '+romsMissing.length+' registros para romaneios sem produtos? Permite filtrar esses meses na aba Produtos.')) return;
+  const novos = romsMissing.map(d => ({
+    romaneio: String(d.romaneio),
+    cod_produto: 0,
+    descricao: '['+d.marca+'] sem detalhes',
+    quantidade: 1,
+    marca_produto: d.marca,
+    loja: d.loja,
+    mes: d.mes,
+    marca_fornecedor: d.marca,
+    motivo: d.motivo,
+    valor_romaneio: d.valor || 0,
+    status: d.status,
+    _generico: true
+  }));
+  APP.produtos = [...APP.produtos, ...novos];
+  const cnt = document.getElementById('cnt-produtos');
+  if(cnt) cnt.textContent = APP.produtos.length.toLocaleString('pt-BR');
+  initProdFilters();
+  applyProdFilters();
+  if(log) log.innerHTML += '<br><span class="log-ok">✅ '+novos.length+' registros criados! Veja na aba Produtos.</span>';
+  if(status) status.textContent = novos.length+' sincronizados';
+  toast('✅ '+novos.length.toLocaleString('pt-BR')+' romaneios sincronizados', 'green');
+}
+window.sincronizarProdutos = sincronizarProdutos;
+
 window.drillRowClick = function(idx){
   const row = window._drillRows && window._drillRows[idx];
   if(row) window.dashClick(row.dim, row.val);
@@ -4374,6 +4422,16 @@ document.addEventListener('DOMContentLoaded', function(){
           </div>
           <div class="import-log" id="paste-log">Aguardando dados...</div>
         </div>
+        <div class="import-card full" data-role="admin">
+          <h2>🔄 Sincronizar Produtos com Romaneios</h2>
+          <p>Gera automaticamente registros de produto para os romaneios que ainda não têm produtos vinculados. Usa os dados já existentes no <strong>produtos.json</strong> cruzando com os romaneios do Firebase. Para meses sem produto no arquivo, cria um registro genérico com a marca do romaneio.</p>
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px">
+            <button class="btn btn-amber" onclick="window.sincronizarProdutos&&window.sincronizarProdutos()">🔄 Sincronizar agora</button>
+            <span id="sinc-status" style="font-size:12px;color:var(--text-dim)"></span>
+          </div>
+          <div class="import-log" id="sinc-log">Aguardando...</div>
+        </div>
+
         <div class="import-card full" data-role="admin">
           <h2>📦 Importar Planilha de Produtos</h2>
           <p>Arraste o arquivo .xlsx de produtos exportado do ERP. Colunas esperadas: <strong>SAIDA_ESTOQUE · EMPRESA · PRODUTO · DESCRICAO · QUANTIDADE · MARCA · DESCRICAO</strong><br>
